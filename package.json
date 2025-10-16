@@ -13,6 +13,7 @@
     "@metamask/delegation-utils": "^0.11.0",
     "@metamask/sdk": "^0.33.1",
     "@metamask/sdk-react": "^0.33.1",
+    "@tanstack/react-query": "^5.90.3",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "ethers": "^5.8.0",
@@ -22,7 +23,9 @@
     "openai": "^6.3.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "viem": "^2.38.2",
+    "wagmi": "^2.18.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -31,7 +34,7 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
-    "tailwindcss": "^4",
+    "tailwindcss": "^4.1.14",
     "typescript": "^5"
   },
   "packageManager": "pnpm@10.15.0+sha512.486ebc259d3e999a4e8691ce03b5cac4a71cbeca39372a9b762cb500cfdf0873e2cb16abe3d951b1ee2cf012503f027b98b6584e4df22524e0c7450d9ec7aa7b"

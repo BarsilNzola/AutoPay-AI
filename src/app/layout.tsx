@@ -3,7 +3,10 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 
-const inter = Inter({ subsets: ['latin'] })
+const inter = Inter({ 
+  subsets: ['latin'],
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'AutoPay AI - Smart Wallet Assistant',
@@ -16,12 +19,15 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="en" style={inter.style}>
+      <body style={{
+        margin: 0,
+        padding: 0,
+        minHeight: '100vh',
+        background: 'linear-gradient(to bottom right, #dbeafe, #e0e7ff)'
+      }}>
         <Providers>
-          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-            {children}
-          </div>
+          {children}
         </Providers>
       </body>
     </html>

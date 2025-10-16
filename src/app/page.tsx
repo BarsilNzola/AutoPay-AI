@@ -1,12 +1,21 @@
 'use client'
 
 import { useAccount } from 'wagmi'
-import ConnectWallet from '@/components/ConnectWallet'
-import Dashboard from '@/components/Dashboard'
-import ChatBox from '@/components/ChatBox'
+import dynamic from 'next/dynamic'
+
+// Dynamically import components to avoid hydration issues
+const ConnectWallet = dynamic(() => import('@/components/ConnectWallet'), {
+  ssr: false,
+})
+const Dashboard = dynamic(() => import('@/components/Dashboard'), {
+  ssr: false,
+})
+const ChatBox = dynamic(() => import('@/components/ChatBox'), {
+  ssr: false,
+})
 
 export default function Home() {
-  const { isConnected, address } = useAccount()
+  const { isConnected } = useAccount()
 
   return (
     <main className="container mx-auto px-4 py-8">
