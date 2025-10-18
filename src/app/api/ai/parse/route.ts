@@ -1,218 +1,387 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
 import { automationStorage } from '@/lib/automation'
+import { InferenceClient } from '@huggingface/inference'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+// Initialize Hugging Face Inference Client
+const hf = new InferenceClient(process.env.HUGGING_FACE_API_KEY)
 
+/**
+ * POST /api/ai/parse
+ */
 export async function POST(request: NextRequest) {
   try {
     const { message, userAddress } = await request.json()
-
     if (!message || !userAddress) {
       return NextResponse.json({ error: 'Message and userAddress are required' }, { status: 400 })
     }
 
-    // First, try to parse with our simple parser for immediate automation creation
+    // First, try simple parser (local)
     const parsedCommand = parseUserCommand(message)
-    
     if (parsedCommand) {
-      // Create automation based on parsed command
-      const automation = automationStorage.create({
-        type: parsedCommand.type,
-        description: generateDescription(parsedCommand),
-        status: 'pending', // Requires user confirmation
-        params: parsedCommand.params,
-        userAddress,
-      })
-
-      const friendlyMessage = generateUserFriendlyMessage(parsedCommand)
-
-      return NextResponse.json({ 
-        message: `I'll set that up for you! ${friendlyMessage}`,
-        automation,
-        requiresConfirmation: true,
-        type: 'automation_created'
-      })
-    }
-
-    // If our simple parser doesn't understand, use OpenAI for better understanding
-    const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `You are a helpful wallet automation assistant. Analyze if the user wants to create an automation for:
-
-1. RECURRING_PAYMENT - Send X amount to Y address every Z time
-2. REWARD_CLAIM - Automatically claim staking rewards
-3. STAKING - Automate staking operations
-4. REMINDER - Set reminders for on-chain activities
-
-If it's an automation request but missing details, ask for clarification.
-If it's not an automation request, respond helpfully.
-
-Format your response as JSON:
-{
-  "type": "automation" | "clarification" | "general",
-  "message": "Your response text",
-  "suggested_automation": {
-    "type": "recurring_payment" | "reward_claim" | "staking" | "reminder",
-    "missing_params": ["amount", "recipient", "frequency", etc.]
-  } | null
-}
-
-User's wallet: ${userAddress}
-Chain: Monad Testnet`
-        },
-        {
-          role: "user",
-          content: message
-        }
-      ],
-      max_tokens: 500,
-      temperature: 0.3,
-    })
-
-    const responseText = completion.choices[0]?.message?.content || "I'm not sure how to help with that. Could you provide more details?"
-    
-    try {
-      // Try to parse OpenAI's JSON response
-      const aiResponse = JSON.parse(responseText)
-      
-      if (aiResponse.type === 'automation' && aiResponse.suggested_automation) {
-        // Create automation based on AI understanding
-        const automation = automationStorage.create({
-          type: aiResponse.suggested_automation.type,
-          description: `Automated ${aiResponse.suggested_automation.type.replace('_', ' ')}`,
-          status: 'pending',
-          params: {}, // Will be filled after user provides missing details
-          userAddress,
-        })
-
-        return NextResponse.json({ 
-          message: aiResponse.message,
-          automation,
-          requiresConfirmation: false, // Don't confirm until details are filled
-          missingParams: aiResponse.suggested_automation.missing_params,
-          type: 'automation_draft'
-        })
-      }
-
-      return NextResponse.json({ 
-        message: aiResponse.message,
-        type: 'assistant_response'
-      })
-
-    } catch (parseError) {
-      // If OpenAI returns non-JSON, use it as a regular response
-      return NextResponse.json({ 
-        message: responseText,
-        type: 'assistant_response'
-      })
-    }
-
-  } catch (error) {
-    console.error('AI API error:', error)
-    
-    // Fallback to simple parser if OpenAI fails - pass the original message and userAddress
-    const { message: errorMessage, userAddress: errorUserAddress } = await request.json().catch(() => ({ message: '', userAddress: '' }))
-    
-    const parsedCommand = parseUserCommand(errorMessage)
-    if (parsedCommand && errorUserAddress) {
       const automation = automationStorage.create({
         type: parsedCommand.type,
         description: generateDescription(parsedCommand),
         status: 'pending',
         params: parsedCommand.params,
-        userAddress: errorUserAddress,
+        userAddress,
       })
-
-      return NextResponse.json({ 
+      return NextResponse.json({
         message: `I'll set that up for you! ${generateUserFriendlyMessage(parsedCommand)}`,
         automation,
         requiresConfirmation: true,
-        type: 'automation_created'
+        type: 'automation_created',
       })
     }
 
-    return NextResponse.json(
-      { error: 'Failed to process request' },
-      { status: 500 }
-    )
+    // Only attempt HF models if key present
+    if (!process.env.HUGGING_FACE_API_KEY) {
+      return handleFallbackResponse(message)
+    }
+
+    const aiResponse = await queryHuggingFaceWithFallback(message, userAddress)
+
+    if (aiResponse.type === 'automation' && aiResponse.suggested_automation) {
+      const automation = automationStorage.create({
+        type: aiResponse.suggested_automation.type,
+        description: `Automated ${aiResponse.suggested_automation.type.replace('_', ' ')}`,
+        status: 'pending',
+        params: {},
+        userAddress,
+      })
+      return NextResponse.json({
+        message: aiResponse.message,
+        automation,
+        requiresConfirmation: false,
+        missingParams: aiResponse.suggested_automation.missing_params,
+        type: 'automation_draft',
+      })
+    }
+
+    // Final fallback: local parser again
+    const finalParsed = parseUserCommand(message)
+    if (finalParsed) {
+      const automation = automationStorage.create({
+        type: finalParsed.type,
+        description: generateDescription(finalParsed),
+        status: 'pending',
+        params: finalParsed.params,
+        userAddress,
+      })
+      return NextResponse.json({
+        message: `I'll set that up for you! ${generateUserFriendlyMessage(finalParsed)}`,
+        automation,
+        requiresConfirmation: true,
+        type: 'automation_created',
+      })
+    }
+
+    // Nothing works — send AI message or generic fallback
+    return NextResponse.json({
+      message: aiResponse.message || "I'm not sure how to help with that. Try: 'Send 0.01 ETH weekly' or 'Claim rewards daily'.",
+      type: 'assistant_response',
+    })
+
+  } catch (error) {
+    console.error('AI API error:', error)
+    // Emergency fallback: local parser
+    try {
+      const { message: errMsg, userAddress: errAddr } = await request.json()
+      const parsed = parseUserCommand(errMsg)
+      if (parsed && errAddr) {
+        const automation = automationStorage.create({
+          type: parsed.type,
+          description: generateDescription(parsed),
+          status: 'pending',
+          params: parsed.params,
+          userAddress: errAddr,
+        })
+        return NextResponse.json({
+          message: `I'll set that up for you! ${generateUserFriendlyMessage(parsed)}`,
+          automation,
+          requiresConfirmation: true,
+          type: 'automation_created',
+        })
+      }
+    } catch (inner) {
+      console.error('Final fallback also failed:', inner)
+    }
+    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 })
   }
 }
 
-// Simple command parser for common patterns (fast and free)
-function parseUserCommand(message: string): any {
-  const lowerMessage = message.toLowerCase()
-  
-  if ((lowerMessage.includes('send') || lowerMessage.includes('pay')) && 
-      (lowerMessage.includes('every') || lowerMessage.includes('weekly') || lowerMessage.includes('monthly'))) {
-    
-    const amountMatch = message.match(/(\d+\.?\d*)\s*(ETH|MATIC|MON|USDC|USDT)/i)
-    const toMatch = message.match(/to\s+(0x[a-fA-F0-9]{40}|[a-zA-Z0-9]+\.eth)/i)
-    const frequencyMatch = message.match(/(daily|weekly|monthly|every day|every week|every month)/i)
-    const dayMatch = message.match(/(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i)
-    
-    if (amountMatch && toMatch) {
-      return {
-        type: 'recurring_payment' as const,
-        params: {
-          amount: amountMatch[1],
-          currency: amountMatch[2]?.toUpperCase(),
-          recipient: toMatch[1],
-          frequency: frequencyMatch ? frequencyMatch[1].toLowerCase() : 'weekly',
-          dayOfWeek: dayMatch ? dayMatch[1].toLowerCase() : undefined,
-        }
+
+/**
+ * Try multiple Hugging Face models sequentially, fall back to parser
+ */
+async function queryHuggingFaceWithFallback(message: string, userAddress: string): Promise<any> {
+  const prompt = buildPrompt(message, userAddress)
+
+  // Use models likely to be supported — adjust as needed for your account
+  const models = [
+    'HuggingFaceH4/zephyr-7b-beta',  // instruction-capable model
+    'meta-llama/Llama-2-7b-chat-hf',  // a chat / instruction model
+    'google/flan-t5-large',          // text2text (if available)
+  ]
+
+  for (const model of models) {
+    try {
+      console.log(`🔍 Trying model: ${model}`)
+      const response = await hf.textGeneration({
+        model,
+        inputs: prompt,
+        parameters: {
+          max_new_tokens: 200,
+          temperature: 0.3,
+          do_sample: true,
+        },
+      }) as any
+
+      const generatedText = (response.generated_text || response || '').toString().trim()
+      console.log(`✅ Model responded (${model}):`, generatedText.substring(0, 80))
+
+      const jsonMatch = generatedText.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0])
+        parsed._modelUsed = model
+        return parsed
       }
-    }
-  }
-  
-  if (lowerMessage.includes('claim') && lowerMessage.includes('reward')) {
-    return {
-      type: 'reward_claim' as const,
-      params: {
-        frequency: lowerMessage.includes('daily') ? 'daily' : 'weekly',
+
+      // Interpret plain text fallback
+      return analyzeTextResponse(generatedText, message)
+    } catch (err: any) {
+      console.warn(`⚠️ Model ${model} failed:`, err.message)
+      // If provider missing or 503, continue to next model
+      if (err.message?.includes('No Inference Provider') || err.message?.includes('unsupported')) {
+        continue
+      }
+      if (err.response?.status === 503) {
+        continue
       }
     }
   }
 
-  if (lowerMessage.includes('stake') && lowerMessage.includes('every')) {
+  console.warn('⚠️ All Hugging Face models failed. Using local parser fallback.')
+
+  const localParsed = parseUserCommand(message)
+  if (localParsed) {
     return {
-      type: 'staking' as const,
-      params: {
-        frequency: lowerMessage.includes('daily') ? 'daily' : 'weekly',
+      type: 'automation',
+      message: `I'll set that up for you! ${generateUserFriendlyMessage(localParsed)}`,
+      suggested_automation: {
+        type: localParsed.type,
+        missing_params: getMissingParams(localParsed),
       }
     }
   }
-  
+
+  return {
+    type: 'general',
+    message: "I can help set up automations like recurring payments, staking, or reminders. Try: 'Send 0.01 ETH every week' or 'Claim rewards daily'.",
+    suggested_automation: null,
+  }
+}
+
+/** Build the instruction prompt */
+function buildPrompt(message: string, userAddress: string) {
+  return `You are a wallet automation assistant. Analyze if the user wants to create an on-chain automation.
+
+Available automation types:
+- recurring_payment: Send X amount to Y address every Z time
+- reward_claim: Automatically claim staking rewards
+- staking: Automate staking
+- reminder: Set reminders for on-chain activities
+
+User wallet: ${userAddress}
+Chain: Monad testnet
+
+User: "${message}"
+
+Respond with JSON only:
+{
+  "type": "automation" | "clarification" | "general",
+  "message": "Your human-friendly reply",
+  "suggested_automation": {
+    "type": "recurring_payment" | "reward_claim" | "staking" | "reminder",
+    "missing_params": ["amount", "recipient", "frequency"]
+  } | null
+}`
+}
+
+/** Fallback analysis of plain text */
+function analyzeTextResponse(generatedText: string, originalMessage: string): any {
+  // Try local command parser first
+  const local = parseUserCommand(originalMessage)
+  if (local) {
+    return {
+      type: 'automation',
+      message: `I'll set that up for you! ${generateUserFriendlyMessage(local)}`,
+      suggested_automation: {
+        type: local.type,
+        missing_params: getMissingParams(local),
+      }
+    }
+  }
+
+  const lower = generatedText.toLowerCase()
+  if (lower.includes('send') || lower.includes('transfer') || lower.includes('payment')) {
+    return {
+      type: 'automation',
+      message: generatedText,
+      suggested_automation: { type: 'recurring_payment', missing_params: ['amount', 'recipient', 'frequency'] }
+    }
+  }
+  if (lower.includes('claim') || lower.includes('reward')) {
+    return {
+      type: 'automation',
+      message: generatedText,
+      suggested_automation: { type: 'reward_claim', missing_params: ['frequency'] }
+    }
+  }
+  if (lower.includes('stake')) {
+    return {
+      type: 'automation',
+      message: generatedText,
+      suggested_automation: { type: 'staking', missing_params: ['frequency', 'amount'] }
+    }
+  }
+  if (lower.includes('remind') || lower.includes('alert') || lower.includes('notify')) {
+    return {
+      type: 'automation',
+      message: generatedText,
+      suggested_automation: { type: 'reminder', missing_params: ['time', 'message'] }
+    }
+  }
+  return {
+    type: 'general',
+    message: generatedText || "I’m not sure how to help with that.",
+    suggested_automation: null,
+  }
+}
+
+/** Compute missing parameters for a parsed command */
+function getMissingParams(parsedCommand: any): string[] {
+  switch (parsedCommand.type) {
+    case 'recurring_payment':
+      return ['amount', 'recipient', 'frequency'].filter(p => !parsedCommand.params[p])
+    case 'reward_claim':
+      return ['frequency'].filter(p => !parsedCommand.params[p])
+    case 'staking':
+      return ['frequency', 'amount'].filter(p => !parsedCommand.params[p])
+    case 'reminder':
+      return ['time', 'message'].filter(p => !parsedCommand.params[p])
+    default:
+      return []
+  }
+}
+
+/** Fallback when no HF key or models */
+function handleFallbackResponse(message: string) {
+  const parsed = parseUserCommand(message)
+  if (parsed) {
+    return NextResponse.json({
+      message: `I'll set that up for you! ${generateUserFriendlyMessage(parsed)}`,
+      automation: {
+        type: parsed.type,
+        description: generateDescription(parsed),
+        status: 'pending',
+        params: parsed.params,
+      },
+      requiresConfirmation: true,
+      type: 'automation_created'
+    })
+  }
+
+  const lower = message.toLowerCase()
+  if (lower.includes('payment') || lower.includes('send')) {
+    return NextResponse.json({ message: "I can help you set up recurring payments. Please specify amount, recipient, and frequency.", type: 'clarification' })
+  }
+  if (lower.includes('claim') || lower.includes('reward')) {
+    return NextResponse.json({ message: "I can automate reward claims. Please specify frequency (daily, weekly).", type: 'clarification' })
+  }
+  if (lower.includes('stake')) {
+    return NextResponse.json({ message: "I can automate staking. Please specify amount and frequency.", type: 'clarification' })
+  }
+  return NextResponse.json({
+    message: "Try commands like: 'Send 0.01 ETH weekly' or 'Claim rewards daily'.",
+    type: 'general'
+  })
+}
+
+/** Local command parser (as before) */
+function parseUserCommand(message: string): any {
+  const lower = message.toLowerCase().trim()
+  // Recurring payment pattern
+  if ((lower.includes('send') || lower.includes('pay') || lower.includes('transfer'))
+    && (lower.includes('every') || lower.includes('weekly') || lower.includes('monthly') || lower.includes('daily'))) {
+    const amount = message.match(/(\d+\.?\d*)\s*(ETH|USDC|USDT|MON)/i)
+    const to = message.match(/to\s+(0x[a-fA-F0-9]{40}|[a-zA-Z0-9]+\.eth)/i)
+    const freq = message.match(/(daily|weekly|monthly|every day|every week|every month)/i)
+    if (amount && to) {
+      return {
+        type: 'recurring_payment',
+        params: {
+          amount: amount[1],
+          currency: amount[2]?.toUpperCase(),
+          recipient: to[1],
+          frequency: freq ? freq[1].toLowerCase() : 'weekly',
+        },
+      }
+    }
+  }
+
+  // Reward claim
+  if ((lower.includes('claim') && lower.includes('reward')) || lower.includes('auto claim') || lower.includes('claim automatically') || lower.includes('claim rewards')) {
+    return {
+      type: 'reward_claim',
+      params: { frequency: lower.includes('daily') ? 'daily' : 'weekly' }
+    }
+  }
+
+  // Staking
+  if ((lower.includes('stake') && lower.includes('every')) || lower.includes('auto stake') || lower.includes('stake automatically') || lower.includes('stake tokens')) {
+    return {
+      type: 'staking',
+      params: { frequency: lower.includes('daily') ? 'daily' : 'weekly' }
+    }
+  }
+
+  // Reminder
+  if (lower.includes('remind') || lower.includes('alert') || lower.includes('notify')) {
+    return {
+      type: 'reminder',
+      params: { frequency: 'once', message }
+    }
+  }
+
   return null
 }
 
-function generateDescription(parsedCommand: any): string {
-  switch (parsedCommand.type) {
+function generateDescription(cmd: any): string {
+  switch (cmd.type) {
     case 'recurring_payment':
-      return `Send ${parsedCommand.params.amount} ${parsedCommand.params.currency} to ${parsedCommand.params.recipient} ${parsedCommand.params.frequency}`
+      return `Send ${cmd.params.amount} ${cmd.params.currency} to ${cmd.params.recipient} ${cmd.params.frequency}`
     case 'reward_claim':
-      return `Claim staking rewards ${parsedCommand.params.frequency}`
+      return `Claim rewards ${cmd.params.frequency}`
     case 'staking':
-      return `Stake tokens ${parsedCommand.params.frequency}`
+      return `Stake tokens ${cmd.params.frequency}`
+    case 'reminder':
+      return `Reminder: ${cmd.params.message.substring(0, 50)}...`
     default:
-      return 'Automated on-chain task'
+      return 'Automated on-chain action'
   }
 }
 
-function generateUserFriendlyMessage(parsedCommand: any): string {
-  switch (parsedCommand.type) {
+function generateUserFriendlyMessage(cmd: any): string {
+  switch (cmd.type) {
     case 'recurring_payment':
-      return `I'll send ${parsedCommand.params.amount} ${parsedCommand.params.currency} to ${parsedCommand.params.recipient} ${parsedCommand.params.frequency}. You'll need to confirm this setup.`
+      return `I'll send ${cmd.params.amount} ${cmd.params.currency} to ${cmd.params.recipient} ${cmd.params.frequency}. Please confirm this setup.`
     case 'reward_claim':
-      return `I'll automatically claim your staking rewards ${parsedCommand.params.frequency}. You'll need to confirm this setup.`
+      return `I'll automatically claim your rewards ${cmd.params.frequency}. Please confirm this setup.`
     case 'staking':
-      return `I'll automate your staking operations ${parsedCommand.params.frequency}. You'll need to confirm this setup.`
+      return `I'll automate staking ${cmd.params.frequency}. Please confirm.`
+    case 'reminder':
+      return `I'll set up a reminder for you. Please confirm.`
     default:
-      return 'Your automation has been created and is pending confirmation.'
+      return 'Your automation request is pending confirmation.'
   }
 }

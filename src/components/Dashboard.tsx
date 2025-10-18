@@ -21,13 +21,32 @@ export default function Dashboard() {
     }
   }, [address])
 
+  // Listen for automation updates from chatbox
+  useEffect(() => {
+    const handleAutomationUpdate = () => {
+      console.log('Automation update event received, refreshing...')
+      loadUserAutomations()
+    }
+
+    window.addEventListener('automationUpdated', handleAutomationUpdate)
+    
+    return () => {
+      window.removeEventListener('automationUpdated', handleAutomationUpdate)
+    }
+  }, [])
+
   const loadUserAutomations = async () => {
+    if (!address) return
+    
     setIsLoading(true)
     try {
-      // In a real app, this would be an API call
       const response = await fetch(`/api/automations?user=${address}`)
-      const data = await response.json()
-      setAutomations(data.automations || [])
+      if (response.ok) {
+        const data = await response.json()
+        setAutomations(data.automations || [])
+      } else {
+        console.error('Failed to fetch automations')
+      }
     } catch (error) {
       console.error('Failed to load automations:', error)
     } finally {
@@ -40,14 +59,15 @@ export default function Dashboard() {
   }
 
   const handleSettings = () => {
-    // Will be implemented in Phase 2
     console.log('Settings clicked')
   }
 
   const handleCreateFirstAutomation = () => {
-    const chatInput = document.querySelector('input[type="text"]') as HTMLInputElement
+    // Focus the chat input if it exists
+    const chatInput = document.querySelector('textarea') as HTMLTextAreaElement
     if (chatInput) {
       chatInput.focus()
+      chatInput.scrollIntoView({ behavior: 'smooth' })
     }
   }
 

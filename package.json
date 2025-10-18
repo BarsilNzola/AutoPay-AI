@@ -10,6 +10,7 @@
   "dependencies": {
     "@account-abstraction/sdk": "^0.6.0",
     "@ai-sdk/openai": "^2.0.52",
+    "@huggingface/inference": "^4.11.3",
     "@metamask/delegation-utils": "^0.11.0",
     "@metamask/sdk": "^0.33.1",
     "@metamask/sdk-react": "^0.33.1",
@@ -25,7 +26,8 @@
     "react-dom": "19.1.0",
     "tailwind-merge": "^3.3.1",
     "viem": "^2.38.2",
-    "wagmi": "^2.18.1"
+    "wagmi": "^2.18.1",
+    "webauthn-p256": "^0.0.10"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

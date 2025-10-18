@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useAccount } from 'wagmi'
+import { useAccount, useWalletClient, useChainId } from 'wagmi'
+import { DelegationService } from '@/lib/delegation-service'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -22,7 +23,9 @@ export default function ChatBox() {
   ])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const { address } = useAccount()
+  const { address, isConnected } = useAccount()
+  const { data: walletClient } = useWalletClient()
+  const chainId = useChainId()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -32,6 +35,28 @@ export default function ChatBox() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // Debug wallet connection status
+  useEffect(() => {
+    console.log('🔗 Wallet connection status:', {
+      isConnected,
+      address,
+      hasWalletClient: !!walletClient,
+      chainId
+    })
+  }, [isConnected, address, walletClient, chainId])
+
+  const getChainName = (chainId: number): string => {
+    switch (chainId) {
+      case 10143: return 'Monad Testnet'
+      case 11155111: return 'Sepolia'
+      case 1: return 'Ethereum Mainnet'
+      case 5: return 'Goerli'
+      case 137: return 'Polygon'
+      case 80001: return 'Mumbai'
+      default: return `Chain ${chainId}`
+    }
+  }
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
@@ -72,7 +97,6 @@ export default function ChatBox() {
 
       // Refresh dashboard to show new automation
       if (data.automation) {
-        // Trigger a custom event that Dashboard can listen to
         window.dispatchEvent(new CustomEvent('automationUpdated'))
       }
 
@@ -90,13 +114,68 @@ export default function ChatBox() {
 
   const handleConfirmAutomation = async (automationId: string) => {
     try {
+      console.log('🔄 Starting automation confirmation...', {
+        automationId,
+        address,
+        isConnected,
+        hasWalletClient: !!walletClient,
+        chainId
+      })
+
       // Update message to show confirmation in progress
       setMessages(prev => prev.map(msg => 
         msg.automation?.id === automationId 
           ? { ...msg, content: "Setting up automation...", pending: true }
           : msg
       ))
+  
+      // Comprehensive validation
+      if (!isConnected) {
+        throw new Error('Wallet not connected. Please connect your wallet first.')
+      }
+  
+      if (!address) {
+        throw new Error('User address not available. Please ensure your wallet is connected and try again.')
+      }
+  
+      if (!walletClient) {
+        throw new Error('Wallet client not available. Please refresh the page and try again.')
+      }
 
+      console.log('✅ Wallet validation passed:', {
+        address,
+        chainId,
+        walletClientAccount: walletClient.account
+      })
+  
+      // Get the automation details from current messages
+      const automation = messages.find(msg => msg.automation?.id === automationId)?.automation
+      
+      if (!automation) {
+        throw new Error('Automation not found in current session. Please try creating the automation again.')
+      }
+
+      console.log('📋 Automation details:', automation)
+  
+      const delegationService = new DelegationService()
+      
+      console.log('🏗️ Creating delegation...')
+      // Create and submit delegation on client side with current chain
+      const delegationResult = await delegationService.setupAutomationDelegation(
+        automation, 
+        walletClient, 
+        address,
+        chainId
+      )
+      
+      console.log('📦 Delegation result:', delegationResult)
+      
+      if (!delegationResult.success) {
+        throw new Error(delegationResult.error || 'Delegation setup failed')
+      }
+  
+      console.log('📡 Sending delegation to server...')
+      // Send signed delegation to server for storage and tracking
       const response = await fetch('/api/automations/confirm', {
         method: 'POST',
         headers: {
@@ -104,37 +183,60 @@ export default function ChatBox() {
         },
         body: JSON.stringify({
           automationId,
-          userAddress: address
+          userAddress: address,
+          signedDelegation: delegationResult.delegation,
+          transactionHash: delegationResult.transactionHash,
+          chainId: delegationResult.chainId,
+          isSimulated: delegationResult.isSimulated
         }),
       })
-
+  
       const data = await response.json()
-
+      console.log('✅ Server response:', data)
+  
       if (data.success) {
-        // Update message to show success
+        const chainName = getChainName(chainId)
+        const mode = delegationResult.isSimulated ? '(Simulated Delegation)' : '(Real On-Chain Delegation)'
+        
         setMessages(prev => prev.map(msg => 
           msg.automation?.id === automationId 
             ? { 
                 ...msg, 
-                content: `✅ Automation confirmed and activated! ${data.message}`,
+                content: `✅ Automation activated on ${chainName}! ${mode}\n\nYour automation has been successfully set up and will run automatically based on the schedule you specified.`,
                 pending: false,
                 requiresConfirmation: false
               }
             : msg
         ))
-
-        // Refresh dashboard
+  
         window.dispatchEvent(new CustomEvent('automationUpdated'))
       } else {
-        throw new Error(data.error)
+        throw new Error(data.error || 'Server failed to save automation')
       }
-
+  
     } catch (error) {
+      console.error('❌ Failed to confirm automation:', error)
+      
+      let errorMessage = "❌ Failed to confirm automation. Please try again."
+      if (error instanceof Error) {
+        if (error.message.includes('Wallet not connected')) {
+          errorMessage = "❌ Wallet not connected. Please connect your wallet and try again."
+        } else if (error.message.includes('User address not available')) {
+          errorMessage = "❌ Unable to detect your wallet address. Please ensure your wallet is properly connected."
+        } else if (error.message.includes('Wallet client not available')) {
+          errorMessage = "❌ Wallet connection issue. Please refresh the page and try again."
+        } else if (error.message.includes('Automation not found')) {
+          errorMessage = "❌ Automation session expired. Please create the automation again."
+        } else {
+          errorMessage = `❌ ${error.message}`
+        }
+      }
+      
       setMessages(prev => prev.map(msg => 
         msg.automation?.id === automationId 
           ? { 
               ...msg, 
-              content: "❌ Failed to confirm automation. Please try again.",
+              content: errorMessage,
               pending: false 
             }
           : msg
@@ -159,12 +261,68 @@ export default function ChatBox() {
     }
   }
 
+  // Add connection status indicator
+  const ConnectionStatus = () => {
+    if (!isConnected) {
+      return (
+        <div style={{
+          padding: '0.5rem 1rem',
+          backgroundColor: '#fef2f2',
+          borderBottom: '1px solid #fecaca',
+          fontSize: '0.75rem',
+          color: '#dc2626',
+          textAlign: 'center'
+        }}>
+          ⚠️ Wallet not connected. Please connect your wallet to use automations.
+        </div>
+      )
+    }
+
+    if (!address) {
+      return (
+        <div style={{
+          padding: '0.5rem 1rem',
+          backgroundColor: '#fffbeb',
+          borderBottom: '1px solid #fed7aa',
+          fontSize: '0.75rem',
+          color: '#ea580c',
+          textAlign: 'center'
+        }}>
+          ⚠️ Connecting to wallet... Please wait.
+        </div>
+      )
+    }
+
+    return null
+  }
+
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
       height: '24rem'
     }}>
+      {/* Connection Status */}
+      <ConnectionStatus />
+
+      {/* Current Network Info */}
+      <div style={{
+        padding: '0.5rem 1rem',
+        backgroundColor: '#f3f4f6',
+        borderBottom: '1px solid #e5e7eb',
+        fontSize: '0.75rem',
+        color: '#6b7280'
+      }}>
+        Current Network: <strong>{getChainName(chainId)}</strong>
+        {chainId === 10143 && ' 🔧 (Simulation Mode)'}
+        {(chainId === 11155111 || chainId === 1) && ' 🔗 (Real Delegation)'}
+        {isConnected && address && (
+          <span style={{ marginLeft: '1rem' }}>
+            Wallet: <strong>{address.slice(0, 6)}...{address.slice(-4)}</strong>
+          </span>
+        )}
+      </div>
+
       {/* Messages */}
       <div style={{
         flex: 1,
@@ -261,21 +419,32 @@ export default function ChatBox() {
               {message.requiresConfirmation && !message.pending && (
                 <button
                   onClick={() => handleConfirmAutomation(message.automation.id)}
+                  disabled={!isConnected || !address}
                   style={{
                     padding: '0.5rem 1rem',
-                    backgroundColor: '#10b981',
+                    backgroundColor: (!isConnected || !address) ? '#9ca3af' : '#10b981',
                     color: 'white',
                     border: 'none',
                     borderRadius: '0.375rem',
                     fontSize: '0.75rem',
                     fontWeight: '500',
-                    cursor: 'pointer',
+                    cursor: (!isConnected || !address) ? 'not-allowed' : 'pointer',
                     transition: 'background-color 0.2s'
                   }}
-                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#059669'}
-                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
+                  onMouseOver={(e) => {
+                    if (isConnected && address) {
+                      e.currentTarget.style.backgroundColor = '#059669'
+                    }
+                  }}
+                  onMouseOut={(e) => {
+                    if (isConnected && address) {
+                      e.currentTarget.style.backgroundColor = '#10b981'
+                    }
+                  }}
                 >
-                  ✅ Confirm & Activate Automation
+                  {!isConnected ? '🔒 Connect Wallet First' : 
+                   !address ? '⏳ Connecting...' : 
+                   '✅ Confirm & Activate Automation'}
                 </button>
               )}
 
@@ -360,19 +529,19 @@ export default function ChatBox() {
               fontFamily: 'inherit'
             }}
             rows={2}
-            disabled={isLoading}
+            disabled={isLoading || !isConnected}
           />
           <button
             onClick={handleSend}
-            disabled={isLoading || !input.trim()}
+            disabled={isLoading || !input.trim() || !isConnected}
             style={{
               alignSelf: 'flex-end',
               padding: '0.5rem',
-              backgroundColor: isLoading || !input.trim() ? '#9ca3af' : '#3b82f6',
+              backgroundColor: (isLoading || !input.trim() || !isConnected) ? '#9ca3af' : '#3b82f6',
               color: 'white',
               border: 'none',
               borderRadius: '0.5rem',
-              cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
+              cursor: (isLoading || !input.trim() || !isConnected) ? 'not-allowed' : 'pointer',
               transition: 'background-color 0.2s',
               display: 'flex',
               alignItems: 'center',
@@ -381,12 +550,12 @@ export default function ChatBox() {
               minHeight: '2.5rem'
             }}
             onMouseOver={(e) => {
-              if (!isLoading && input.trim()) {
+              if (!isLoading && input.trim() && isConnected) {
                 e.currentTarget.style.backgroundColor = '#2563eb'
               }
             }}
             onMouseOut={(e) => {
-              if (!isLoading && input.trim()) {
+              if (!isLoading && input.trim() && isConnected) {
                 e.currentTarget.style.backgroundColor = '#3b82f6'
               }
             }}
@@ -394,6 +563,16 @@ export default function ChatBox() {
             <span style={{ fontSize: '1rem' }}>➤</span>
           </button>
         </div>
+        {!isConnected && (
+          <div style={{
+            fontSize: '0.75rem',
+            color: '#dc2626',
+            marginTop: '0.5rem',
+            textAlign: 'center'
+          }}>
+            🔒 Connect your wallet to use the chat
+          </div>
+        )}
       </div>
 
       <style jsx>{`
