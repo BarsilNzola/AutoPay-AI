@@ -1,36 +1,5 @@
-// Lazy import only what we actually need
-let HypersyncClient: any;
-
-// Flag to track if we've attempted to load the native client
-let nativeClientLoaded = false;
-
-// Function to lazy load the native client
-async function loadNativeClient() {
-  if (nativeClientLoaded) return;
-  
-  if (typeof window === 'undefined') {
-    try {
-      const hypersync = await import('@envio-dev/hypersync-client');
-      
-      // Try different ways to access the client
-      HypersyncClient = hypersync.HypersyncClient || hypersync.default?.HypersyncClient || hypersync.default || hypersync;
-      
-      nativeClientLoaded = true;
-      console.log('✅ Native HyperSync client loaded successfully');
-    } catch (error: any) {
-      // Check if it's a platform-specific binary error
-      if (error.message?.includes('could not resolve') || error.message?.includes('win32-x64-msvc')) {
-        console.log('🔧 Platform-native HyperSync client not available, using HTTP mode (this is normal)');
-      } else {
-        console.warn('❌ Failed to load native HyperSync client, falling back to HTTP mode:', error.message);
-      }
-      nativeClientLoaded = false;
-    }
-  } else {
-    console.log('🌐 Using HTTP mode for HyperSync in browser');
-    nativeClientLoaded = false;
-  }
-}
+// Simplified Envio tracker that only uses HTTP mode (no native binaries)
+// This works in browser environments like Netlify
 
 interface AutomationEvent {
   automationId: string;
@@ -57,10 +26,8 @@ interface TransactionEvent {
 }
 
 export class EnvioTracker {
-  private clients: Map<number, any> = new Map();
   private apiKey: string;
   private isEnabled: boolean;
-  private useNativeClient: boolean = false;
 
   // Chain ID to HyperSync URL mapping
   private readonly chainConfigs = [
@@ -94,101 +61,14 @@ export class EnvioTracker {
   ];
 
   constructor() {
-    this.apiKey = process.env.NEXT_PUBLIC_ENVIO_API_KEY || '';
+    this.apiKey = process.env.ENVIO_API_KEY || '';
     this.isEnabled = !!this.apiKey;
     
     if (!this.isEnabled) {
       console.warn('Envio tracking is disabled - missing API key');
     } else {
-      console.log('Envio HyperSync tracking enabled');
-      this.initializeClientMode();
+      console.log('Envio HyperSync tracking enabled (HTTP mode only)');
     }
-  }
-
-  private async initializeClientMode() {
-    // Try to load native client, but don't block initialization
-    loadNativeClient().then(() => {
-      if (nativeClientLoaded && HypersyncClient) {
-        this.useNativeClient = true;
-        console.log('🚀 Using native HyperSync client for optimal performance');
-        this.initializeNativeClients();
-      } else {
-        this.useNativeClient = false;
-        console.log('🌐 Using HTTP mode for HyperSync queries');
-      }
-    }).catch(() => {
-      this.useNativeClient = false;
-      console.log('🌐 Using HTTP mode for HyperSync queries (fallback)');
-    });
-  }
-
-  private initializeNativeClients() {
-    if (!this.useNativeClient) return;
-
-    this.chainConfigs.forEach(config => {
-      try {
-        let client;
-        
-        if (typeof HypersyncClient.new === 'function') {
-          client = HypersyncClient.new({
-            url: config.url,
-            bearerToken: this.apiKey,
-          });
-        } else if (HypersyncClient.HypersyncClient && typeof HypersyncClient.HypersyncClient.new === 'function') {
-          client = HypersyncClient.HypersyncClient.new({
-            url: config.url,
-            bearerToken: this.apiKey,
-          });
-        } else {
-          console.warn(`❌ Cannot initialize native client for ${config.name} - no valid constructor found`);
-          return;
-        }
-        
-        this.clients.set(config.chainId, client);
-        console.log(`✅ Native HyperSync client initialized for ${config.name} (chain ${config.chainId})`);
-      } catch (error) {
-        console.warn(`❌ Failed to initialize native client for ${config.name}:`, error);
-      }
-    });
-  }
-
-  private getNativeClient(chainId?: number): any {
-    if (!this.useNativeClient) return null;
-    
-    if (!chainId) chainId = 10143;
-    
-    let client = this.clients.get(chainId);
-    
-    if (!client) {
-      const chainConfig = this.chainConfigs.find(c => c.chainId === chainId);
-      if (chainConfig) {
-        try {
-          let newClient;
-          if (typeof HypersyncClient.new === 'function') {
-            newClient = HypersyncClient.new({
-              url: chainConfig.url,
-              bearerToken: this.apiKey,
-            });
-          } else if (HypersyncClient.HypersyncClient && typeof HypersyncClient.HypersyncClient.new === 'function') {
-            newClient = HypersyncClient.HypersyncClient.new({
-              url: chainConfig.url,
-              bearerToken: this.apiKey,
-            });
-          } else {
-            return null;
-          }
-          
-          this.clients.set(chainId, newClient);
-          console.log(`✅ Created native HyperSync client for chain ${chainId} on-the-fly`);
-          return newClient;
-        } catch (error) {
-          console.warn(`❌ Failed to create native client for chain ${chainId}:`, error);
-          return null;
-        }
-      }
-    }
-    
-    return client;
   }
 
   private getChainUrl(chainId?: number): string | null {
@@ -209,11 +89,16 @@ export class EnvioTracker {
     return this.realChains.includes(chainId);
   }
 
-  // Make HTTP request to HyperSync endpoint (fallback)
+  // Make HTTP request to HyperSync endpoint
   private async makeHyperSyncRequest(chainId: number, query: any): Promise<any> {
+    const url = this.getChainUrl(chainId);
+    if (!url) {
+      throw new Error(`No HyperSync URL for chain ${chainId}`);
+    }
+
     try {
-      console.log(`🔗 Making HyperSync request via proxy for chain ${chainId}`)
-  
+      console.log(`🌐 Making HyperSync HTTP request to ${this.getChainName(chainId)}`);
+
       const response = await fetch('/api/hypersync', {
         method: 'POST',
         headers: {
@@ -223,25 +108,25 @@ export class EnvioTracker {
           chainId,
           query: this.createQuery(query)
         }),
-      })
-  
+      });
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(`HyperSync proxy error: ${response.status} - ${errorData.error || 'Unknown error'}`)
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`HyperSync proxy error: ${response.status} - ${errorData.error || 'Unknown error'}`);
       }
-  
-      const result = await response.json()
+
+      const result = await response.json();
       
       if (result.success) {
-        console.log(`✅ HyperSync proxy request successful for chain ${chainId}`)
-        return result.data
+        console.log(`✅ HyperSync request successful for chain ${chainId}`);
+        return result.data;
       } else {
-        throw new Error(`HyperSync proxy returned error: ${result.error}`)
+        throw new Error(`HyperSync proxy returned error: ${result.error}`);
       }
-  
+
     } catch (error) {
-      console.error('HyperSync proxy request failed:', error)
-      throw error
+      console.error('HyperSync request failed:', error);
+      throw error;
     }
   }
 
@@ -255,42 +140,6 @@ export class EnvioTracker {
         log: ['data', 'topics', 'address']
       },
     };
-  }
-
-  // Make native HyperSync query
-  private async makeNativeQuery(chainId: number, baseQuery: any): Promise<any> {
-    const client = this.getNativeClient(chainId);
-    if (!client) {
-      throw new Error(`No native HyperSync client for chain ${chainId}`);
-    }
-
-    try {
-      const query = this.createQuery(baseQuery);
-      return await client.get(query);
-    } catch (error) {
-      console.error('Native HyperSync query failed:', error);
-      throw error;
-    }
-  }
-
-  // Unified query method that tries native first, then falls back to HTTP
-  private async makeQuery(chainId: number, baseQuery: any): Promise<any> {
-    // Wait for native client to load if we're still initializing
-    if (!nativeClientLoaded && typeof window === 'undefined') {
-      await loadNativeClient();
-    }
-  
-    if (this.useNativeClient && HypersyncClient) {
-      try {
-        return await this.makeNativeQuery(chainId, baseQuery);
-      } catch (error) {
-        console.warn('Native query failed, falling back to HTTP proxy:', error);
-        // Fall through to HTTP proxy
-      }
-    }
-  
-    // Fallback to HTTP proxy (always use proxy for browser requests)
-    return await this.makeHyperSyncRequest(chainId, baseQuery);
   }
 
   // Get MetaMask DelegationManager address for a chain
@@ -330,7 +179,7 @@ export class EnvioTracker {
         }
       };
 
-      const data = await this.makeQuery(chainId, baseQuery);
+      const data = await this.makeHyperSyncRequest(chainId, baseQuery);
       
       const automationEvents: any[] = [];
       
@@ -401,37 +250,19 @@ export class EnvioTracker {
             eventType: event.eventType,
             details: event.details
           })).slice(0, limit);
-  
+
           console.log(`✅ Found ${formattedEvents.length} events for chain ${chainId} from API`);
           return formattedEvents;
         } else {
-          throw new Error('API returned error: ' + (data.error || 'Unknown error'));
+          console.warn('API returned error:', data.error);
+          return [];
         }
       } else {
-        throw new Error(`API request failed with status: ${response.status}`);
+        console.warn(`API request failed with status: ${response.status}`);
+        return [];
       }
     } catch (error) {
       console.warn('Event storage API failed:', error);
-      // Fallback to checking if we're in server context and can access directly
-      try {
-        if (typeof window === 'undefined') {
-          // We're in server context, try direct import
-          const { eventStorage } = await import('@/lib/automation');
-          const events = eventStorage.getByUser(userAddress)
-            .filter(event => event.chainId === chainId)
-            .slice(0, limit);
-          
-          console.log(`✅ Found ${events.length} events via direct server access`);
-          return events.map(event => ({
-            ...event,
-            timestamp: event.timestamp.toISOString(),
-            chainName: this.getChainName(chainId)
-          }));
-        }
-      } catch (directError) {
-        console.warn('Direct server access also failed:', directError);
-      }
-      
       return this.generateMockAutomationEvents(userAddress, chainId, limit);
     }
   }
@@ -488,7 +319,7 @@ export class EnvioTracker {
         }
       };
 
-      const data = await this.makeQuery(chainId, baseQuery);
+      const data = await this.makeHyperSyncRequest(chainId, baseQuery);
       
       if (data && data.transactions) {
         return data.transactions.map((tx: any) => ({
@@ -528,7 +359,7 @@ export class EnvioTracker {
         }
       };
 
-      const data = await this.makeQuery(chainId, baseQuery);
+      const data = await this.makeHyperSyncRequest(chainId, baseQuery);
       
       if (data && data.transactions) {
         return data.transactions
@@ -657,7 +488,7 @@ export class EnvioTracker {
         user: event.userAddress,
         type: event.type,
         simulated: event.isSimulated,
-        mode: this.useNativeClient ? 'native' : 'http'
+        mode: 'http'
       });
 
       // Simulate successful tracking
@@ -687,7 +518,7 @@ export class EnvioTracker {
           transactionHash: event.transactionHash,
           type: event.type,
           status: event.status,
-          mode: this.useNativeClient ? 'native' : 'http'
+          mode: 'http'
         });
 
         // Simulate successful tracking
@@ -879,7 +710,7 @@ export class EnvioTracker {
 
   // Check if native client is available
   isUsingNativeClient(): boolean {
-    return this.useNativeClient && nativeClientLoaded;
+    return false; // Always false in this version
   }
 
   // Test HyperSync connection
@@ -900,7 +731,7 @@ export class EnvioTracker {
         transactions: [],
       };
 
-      await this.makeQuery(targetChainId, baseQuery);
+      await this.makeHyperSyncRequest(targetChainId, baseQuery);
       
       console.log(`✅ HyperSync connection successful for ${this.getChainName(targetChainId)}`);
       return true;
