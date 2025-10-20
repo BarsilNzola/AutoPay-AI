@@ -40,7 +40,10 @@ export async function getWalletConnectSigner(chainId: number): Promise<WalletCli
     transport: custom(provider),
   });
 
-  console.log('✅ WalletConnect connected:', walletClient.account?.address);
+  // Get accounts to verify connection
+  const accounts = await walletClient.getAddresses();
+  console.log('✅ WalletConnect connected:', accounts[0]);
+  
   return walletClient;
 }
 
