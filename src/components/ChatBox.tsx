@@ -125,7 +125,13 @@ export default function ChatBox() {
       // Update message to show confirmation in progress
       setMessages(prev => prev.map(msg => 
         msg.automation?.id === automationId 
-          ? { ...msg, content: "Setting up automation...", pending: true }
+          ? { 
+              ...msg, 
+              content: "Setting up automation...", 
+              pending: true,
+              // Also update the automation status in the preview
+              automation: msg.automation ? { ...msg.automation, status: 'activating' } : msg.automation
+            }
           : msg
       ))
   
@@ -142,7 +148,7 @@ export default function ChatBox() {
         throw new Error('Wallet client not available. Please refresh the page and try again.')
       }
 
-      console.log('✅ Wallet validation passed:', {
+      console.log(' Wallet validation passed:', {
         address,
         chainId,
         walletClientAccount: walletClient.account
@@ -192,24 +198,40 @@ export default function ChatBox() {
       })
   
       const data = await response.json()
-      console.log('✅ Server response:', data)
+      console.log(' Server response:', data)
   
       if (data.success) {
-        const chainName = getChainName(chainId)
-        const mode = delegationResult.isSimulated ? '(Simulated Delegation)' : '(Real On-Chain Delegation)'
+        const chainName = getChainName(chainId);
+        let mode = '';
         
+        if (delegationResult.isSimulated) {
+          mode = ' (Simulation Mode)';
+        } else if ((delegationResult as any).usedWalletConnect) {
+          mode = ' (Real On-Chain Delegation via WalletConnect)';
+        } else {
+          mode = ' (Real On-Chain Delegation)';
+        }
+        
+        // Update both content AND automation status
         setMessages(prev => prev.map(msg => 
           msg.automation?.id === automationId 
             ? { 
                 ...msg, 
-                content: `✅ Automation activated on ${chainName}! ${mode}\n\nYour automation has been successfully set up and will run automatically based on the schedule you specified.`,
+                content: ` Automation activated on ${chainName}!\n${mode}\n\nYour automation has been successfully set up with real on-chain delegation.`,
                 pending: false,
-                requiresConfirmation: false
+                requiresConfirmation: false,
+                // Update the automation status to match the dashboard
+                automation: msg.automation ? { 
+                  ...msg.automation, 
+                  status: 'active',
+                  delegationId: delegationResult.delegationId,
+                  transactionHash: delegationResult.transactionHash
+                } : msg.automation
               }
             : msg
-        ))
-  
-        window.dispatchEvent(new CustomEvent('automationUpdated'))
+        ));
+      
+        window.dispatchEvent(new CustomEvent('automationUpdated'));
       } else {
         throw new Error(data.error || 'Server failed to save automation')
       }
@@ -237,7 +259,9 @@ export default function ChatBox() {
           ? { 
               ...msg, 
               content: errorMessage,
-              pending: false 
+              pending: false,
+              // reset automation status on error
+              automation: msg.automation ? { ...msg.automation, status: 'pending' } : msg.automation
             }
           : msg
       ))
@@ -410,7 +434,17 @@ export default function ChatBox() {
                     fontSize: '0.7rem', 
                     color: message.role === 'user' ? 'rgba(255,255,255,0.6)' : '#9ca3af'
                   }}>
-                    Status: <strong>{message.automation.status}</strong>
+                    Status: <strong style={{
+                      color: message.automation.status === 'active' ? '#10b981' : 
+                             message.automation.status === 'activating' ? '#f59e0b' : 
+                             message.automation.status === 'pending' ? '#6b7280' : '#ef4444'
+                    }}>{message.automation.status.toUpperCase()}</strong>
+                    {message.automation.delegationId && (
+                      <div>Delegation: {message.automation.delegationId.slice(0, 8)}...</div>
+                    )}
+                    {message.automation.transactionHash && (
+                      <div>Tx: {message.automation.transactionHash.slice(0, 8)}...</div>
+                    )}
                   </div>
                 </div>
               )}

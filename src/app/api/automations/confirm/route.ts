@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { automationStorage } from '@/lib/automation'
+import { automationStorage, eventStorage } from '@/lib/automation'
 import { 
   trackAutomationInEnvio, 
   trackTransactionInEnvio 
@@ -46,37 +46,67 @@ export async function POST(request: NextRequest) {
       }, { status: 500 })
     }
 
+    // STORE EVENT FOR SIMULATED CHAINS (Monad)
+    if (isSimulated) {
+      try {
+        eventStorage.create({
+          automationId: automationId,
+          userAddress: userAddress,
+          type: automation.type,
+          eventType: 'created',
+          status: 'active',
+          transactionHash: transactionHash,
+          chainId: chainId,
+          isSimulated: isSimulated,
+          params: automation.params,
+          details: {
+            delegationId: signedDelegation.delegationId,
+            frequency: automation.params?.frequency
+          }
+        });
+        console.log(`📝 Stored simulation event for automation ${automationId} on chain ${chainId}`);
+      } catch (error) {
+        console.warn('Failed to store simulation event, but continuing:', error);
+      }
+    }
+
     // Track in Envio
-    await trackAutomationInEnvio({
-      automationId: automation.id,
-      userAddress,
-      delegationData: signedDelegation,
-      type: automation.type,
-      params: automation.params,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      // Add chain fields
-      chainId: chainId,
-      isSimulated: isSimulated
-    })
+    try {
+      await trackAutomationInEnvio({
+        automationId: automation.id,
+        userAddress,
+        delegationData: signedDelegation,
+        type: automation.type,
+        params: automation.params,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        chainId: chainId,
+        isSimulated: isSimulated
+      });
+    } catch (error) {
+      console.warn('Envio automation tracking failed, but continuing:', error);
+    }
 
     // Track the delegation transaction if we have a hash
     if (transactionHash) {
-      await trackTransactionInEnvio({
-        automationId: automation.id,
-        userAddress,
-        transactionHash: transactionHash,
-        type: 'delegation_created',
-        status: 'success',
-        timestamp: new Date().toISOString(),
-        details: {
-          delegationId: signedDelegation.delegationId,
-          type: automation.type
-        },
-        // Add chain fields
-        chainId: chainId,
-        isSimulated: isSimulated
-      })
+      try {
+        await trackTransactionInEnvio({
+          automationId: automation.id,
+          userAddress,
+          transactionHash: transactionHash,
+          type: 'delegation_created',
+          status: 'success',
+          timestamp: new Date().toISOString(),
+          details: {
+            delegationId: signedDelegation.delegationId,
+            type: automation.type
+          },
+          chainId: chainId,
+          isSimulated: isSimulated
+        });
+      } catch (error) {
+        console.warn('Envio transaction tracking failed, but continuing:', error);
+      }
     }
 
     console.log('Automation activated:', {

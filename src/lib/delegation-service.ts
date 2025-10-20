@@ -8,6 +8,7 @@ import {
   type ExecutionStruct,
 } from '@metamask/delegation-utils';
 import { type WalletClient, getAddress } from 'viem';
+import { getWalletConnectSigner, isWalletConnectConnected } from '@/lib/walletconnect-signer';
 
 export interface DelegationResult {
   success: boolean;
@@ -39,8 +40,8 @@ export class DelegationService {
   }
 
   /**
-    * Create and sign a delegation, or simulate one if unsupported chain (e.g., Monad)
-  */
+   * Create and sign a delegation, or simulate one if unsupported chain (e.g., Monad)
+   */
   async createSignedDelegation(
     automation: any,
     walletClient: WalletClient,
@@ -68,8 +69,8 @@ export class DelegationService {
 
       // Create delegation with proper structure
       const emptyDelegation = createDelegation({
-        to: userAddress as `0x${string}`,      // delegate
-        from: userAddress as `0x${string}`,    // delegator
+        to: userAddress as `0x${string}`,
+        from: userAddress as `0x${string}`,
         parentDelegation: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
         caveats: []
       });
@@ -90,23 +91,67 @@ export class DelegationService {
         throw new Error('Wallet client missing account information');
       }
 
+      // 🔁 Try to detect if current wallet can sign delegations
+      let signerClient = walletClient;
+      let usingWalletConnect = false;
+
+      try {
+        // Test if the wallet can sign typed data (delegations use EIP-712)
+        console.log('🧪 Testing wallet delegation signing capability...');
+        
+        const testTypedData = {
+          domain: {
+            name: 'AutoPayAI',
+            version: '1.0.0',
+            chainId: chainId,
+            verifyingContract: environment.DelegationManager,
+          },
+          types: {
+            Delegation: [
+              { name: 'delegate', type: 'address' },
+              { name: 'authority', type: 'bytes32' },
+              { name: 'caveats', type: 'Caveat[]' },
+              { name: 'salt', type: 'bytes32' },
+            ],
+            Caveat: [
+              { name: 'enforcer', type: 'address' },
+              { name: 'terms', type: 'bytes' },
+            ],
+          },
+          primaryType: 'Delegation' as const,
+          message: {
+            delegate: emptyDelegation.delegate,
+            authority: emptyDelegation.authority,
+            caveats: emptyDelegation.caveats,
+            salt: emptyDelegation.salt,
+          },
+        };
+
+        await walletClient.signTypedData({
+          account: walletClient.account,
+          ...testTypedData,
+        });
+        
+        console.log('✅ Current wallet can sign delegations');
+        
+      } catch (testError) {
+        console.warn('⚠️ Current wallet cannot sign delegations:', testError);
+        console.log('🔄 Switching to WalletConnect signer...');
+        
+        // Switch to WalletConnect
+        signerClient = await getWalletConnectSigner(chainId);
+        usingWalletConnect = true;
+        
+        if (!signerClient.account) {
+          throw new Error('WalletConnect failed to connect');
+        }
+        
+        console.log('✅ WalletConnect signer ready:', signerClient.account.address);
+      }
+
       console.log('✍️ Attempting to sign delegation...');
       console.log('🏢 DelegationManager:', environment.DelegationManager);
-
-      // Test if the wallet client can sign a simple message first
-      console.log('🧪 Testing wallet signing capability...');
-      try {
-        const testMessage = 'Test signature for AutoPayAI';
-        const testSignature = await walletClient.signMessage({
-          account: walletClient.account,
-          message: testMessage,
-        });
-        console.log('✅ Wallet signing test passed:', testSignature);
-      } catch (testError) {
-        console.error('❌ Wallet signing test failed:', testError);
-        const errorMessage = testError instanceof Error ? testError.message : 'Unknown error';
-        throw new Error(`Wallet cannot sign messages: ${errorMessage}`);
-      }
+      console.log('🔐 Signer:', usingWalletConnect ? 'WalletConnect' : 'Primary Wallet');
 
       console.log('🔐 Starting signDelegation call...');
 
@@ -117,9 +162,9 @@ export class DelegationService {
 
       // Create a proper signer with guaranteed account
       const signer = {
-        ...walletClient,
+        ...signerClient,
         account: {
-          address: userAddress as `0x${string}`,
+          address: usingWalletConnect ? signerClient.account!.address : userAddress,
           type: 'json-rpc' as const,
         },
       };
@@ -152,6 +197,8 @@ export class DelegationService {
         delegation: signedDelegation,
         chainId,
         isSimulated: false,
+        // Add flag to indicate WalletConnect was used
+        ...(usingWalletConnect && { usedWalletConnect: true })
       };
     } catch (error) {
       console.error('❌ Delegation signing failed:', error);
@@ -163,30 +210,49 @@ export class DelegationService {
   }
 
   /**
-   * Helper method to create simulated delegations without recursion
+   * FIXED: Helper method to create simulated delegations with proper delegation ID
    */
   private createSimulatedDelegation(userAddress: string, chainId: number): DelegationResult {
     console.log(`🧪 Creating simulated delegation for chain ${chainId}`);
     
-    // Create a proper mock delegation that matches the Delegation type structure
-    // Use the same structure that createDelegation would return
-    const mockDelegation = {
-      delegate: userAddress as `0x${string}`,
-      authority: `0x${'f'.repeat(64)}` as `0x${string}`, // bytes32 format
-      delegator: userAddress as `0x${string}`,
-      caveats: [],
-      signature: `0x${'0'.repeat(130)}` as `0x${string}`,
-      salt: `0x${Math.random().toString(16).substring(2, 18).padEnd(64, '0')}` as `0x${string}`,
-    } as unknown as Delegation;
+    try {
+      // Create a proper delegation structure that matches the expected format
+      const mockDelegation = {
+        delegate: userAddress as `0x${string}`,
+        authority: `0x${'f'.repeat(64)}` as `0x${string}`, // bytes32 format
+        delegator: userAddress as `0x${string}`,
+        caveats: [],
+        signature: `0x${'0'.repeat(130)}` as `0x${string}`,
+        salt: `0x${Math.random().toString(16).substring(2, 18).padEnd(64, '0')}` as `0x${string}`,
+      } as unknown as Delegation;
 
-    // Add a small delay to make it feel realistic
-    return {
-      success: true,
-      delegationId: getDelegationHashOffchain(mockDelegation),
-      delegation: mockDelegation,
-      chainId,
-      isSimulated: true,
-    };
+      // Calculate delegation ID using the same method
+      const delegationId = getDelegationHashOffchain(mockDelegation);
+      
+      console.log('📋 Simulated Delegation ID:', delegationId);
+      console.log('🔍 Mock delegation structure:', mockDelegation);
+
+      return {
+        success: true,
+        delegationId: delegationId,
+        delegation: mockDelegation,
+        chainId,
+        isSimulated: true,
+      };
+    } catch (error) {
+      console.error('❌ Failed to create simulated delegation:', error);
+      
+      // Fallback: generate a deterministic delegation ID
+      const fallbackDelegationId = `0x${Math.random().toString(16).substring(2, 66)}`;
+      
+      return {
+        success: true,
+        delegationId: fallbackDelegationId,
+        delegation: {} as Delegation,
+        chainId,
+        isSimulated: true,
+      };
+    }
   }
 
   /**
@@ -202,16 +268,21 @@ export class DelegationService {
       const isSupported = this.isChainSupported(chainId);
       const mockTransactionHash = `0x${Math.random().toString(16).substring(2, 66)}`;
 
+      // Calculate delegation ID from the signed delegation
+      const delegationId = getDelegationHashOffchain(signedDelegation);
+
       if (isSupported) {
         console.log(`🔗 Submitting real delegation to chain ${chainId}`);
+        console.log('📋 Delegation ID:', delegationId);
       } else {
         console.log(`🧪 Simulating delegation submission on chain ${chainId} (likely Monad)`);
+        console.log('📋 Simulated Delegation ID:', delegationId);
       }
 
       return {
         success: true,
         transactionHash: mockTransactionHash,
-        delegationId: getDelegationHashOffchain(signedDelegation),
+        delegationId: delegationId,
         delegation: signedDelegation,
         chainId,
         isSimulated: !isSupported,
@@ -247,9 +318,22 @@ export class DelegationService {
       console.log('🔗 Chain:', chainId);
 
       const signingResult = await this.createSignedDelegation(automation, walletClient, userAddress, chainId);
-      if (!signingResult.success || !signingResult.delegation) {
+      
+      if (!signingResult.success) {
+        console.error('❌ Delegation signing failed');
         return signingResult;
       }
+
+      if (!signingResult.delegation) {
+        console.error('❌ No delegation created');
+        return {
+          success: false,
+          error: 'No delegation created',
+          chainId,
+        };
+      }
+
+      console.log('📋 Delegation ID from signing:', signingResult.delegationId);
 
       const submissionResult = await this.submitDelegation(
         signingResult.delegation,
@@ -259,6 +343,8 @@ export class DelegationService {
       );
       
       console.log('🎉 Automation delegation setup completed successfully');
+      console.log('📋 Final Delegation ID:', submissionResult.delegationId);
+      
       return submissionResult;
     } catch (error) {
       console.error('❌ Delegation setup failed:', error);

@@ -10,11 +10,13 @@
   "dependencies": {
     "@account-abstraction/sdk": "^0.6.0",
     "@ai-sdk/openai": "^2.0.52",
+    "@envio-dev/hypersync-client": "^0.6.6",
     "@huggingface/inference": "^4.11.3",
     "@metamask/delegation-utils": "^0.11.0",
     "@metamask/sdk": "^0.33.1",
     "@metamask/sdk-react": "^0.33.1",
     "@tanstack/react-query": "^5.90.3",
+    "@walletconnect/ethereum-provider": "^2.22.4",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "ethers": "^5.8.0",
