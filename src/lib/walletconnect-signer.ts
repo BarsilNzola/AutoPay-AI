@@ -23,8 +23,8 @@ export async function getWalletConnectSigner(chainId: number): Promise<WalletCli
     metadata: {
       name: 'AutoPayAI',
       description: 'Delegation signing via WalletConnect',
-      url: typeof window !== 'undefined' ? window.location.origin : 'https://autopay-ai.vercel.app',
-      icons: ['https://autopay-ai.vercel.app/icon.png'],
+      url: typeof window !== 'undefined' ? window.location.origin : 'https://autopay-ai.netlify.app/',
+      icons: ['https://autopay-ai.netlify.app/'],
     },
   });
 

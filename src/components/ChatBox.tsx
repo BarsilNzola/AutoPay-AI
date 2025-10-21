@@ -176,8 +176,35 @@ export default function ChatBox() {
       
       console.log('📦 Delegation result:', delegationResult)
       
-      if (!delegationResult.success) {
-        throw new Error(delegationResult.error || 'Delegation setup failed')
+      // In handleConfirmAutomation, after getting delegationResult
+      if (delegationResult.success) {
+        let userMessage = '';
+        
+        if (delegationResult.isSimulated) {
+          if (delegationResult.walletType === 'scw') {
+            userMessage = `🔒 Smart Contract Wallet Detected\n\nYour wallet appears to be a smart contract wallet. These currently work in simulation mode only.\n\nFor real on-chain automations with actual fund movements, please use an EOA wallet like MetaMask, Rainbow, or Trust Wallet.\n\nYour automation is active in simulation mode for testing.`;
+          } else {
+            userMessage = `🧪 Simulation Mode\n\nYour automation is running in simulation mode. This is perfect for testing! To enable real on-chain execution, ensure you're using a supported wallet and network.`;
+          }
+        } else {
+          userMessage = `✅ Automation Activated!\n\nYour automation has been successfully set up with real on-chain delegation on ${getChainName(chainId)}.`;
+        }
+
+        setMessages(prev => prev.map(msg => 
+          msg.automation?.id === automationId 
+            ? { 
+                ...msg, 
+                content: userMessage,
+                pending: false,
+                requiresConfirmation: false,
+                automation: msg.automation ? { 
+                  ...msg.automation, 
+                  status: delegationResult.isSimulated ? 'simulated' : 'active',
+                  walletType: delegationResult.walletType
+                } : msg.automation
+              }
+            : msg
+        ));
       }
   
       console.log('📡 Sending delegation to server...')
@@ -289,14 +316,7 @@ export default function ChatBox() {
   const ConnectionStatus = () => {
     if (!isConnected) {
       return (
-        <div style={{
-          padding: '0.5rem 1rem',
-          backgroundColor: '#fef2f2',
-          borderBottom: '1px solid #fecaca',
-          fontSize: '0.75rem',
-          color: '#dc2626',
-          textAlign: 'center'
-        }}>
+        <div className="connection-status connection-error">
           ⚠️ Wallet not connected. Please connect your wallet to use automations.
         </div>
       )
@@ -304,14 +324,7 @@ export default function ChatBox() {
 
     if (!address) {
       return (
-        <div style={{
-          padding: '0.5rem 1rem',
-          backgroundColor: '#fffbeb',
-          borderBottom: '1px solid #fed7aa',
-          fontSize: '0.75rem',
-          color: '#ea580c',
-          textAlign: 'center'
-        }}>
+        <div className="connection-status connection-warning">
           ⚠️ Connecting to wallet... Please wait.
         </div>
       )
@@ -321,129 +334,71 @@ export default function ChatBox() {
   }
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '24rem'
-    }}>
+    <div className="chat-container">
       {/* Connection Status */}
       <ConnectionStatus />
 
       {/* Current Network Info */}
-      <div style={{
-        padding: '0.5rem 1rem',
-        backgroundColor: '#f3f4f6',
-        borderBottom: '1px solid #e5e7eb',
-        fontSize: '0.75rem',
-        color: '#6b7280'
-      }}>
-        Current Network: <strong>{getChainName(chainId)}</strong>
-        {chainId === 10143 && ' 🔧 (Simulation Mode)'}
-        {(chainId === 11155111 || chainId === 1) && ' 🔗 (Real Delegation)'}
+      <div className="network-info">
+        <div className="network-status">
+          <span className="network-label">Current Network:</span>
+          <span className="network-name">{getChainName(chainId)}</span>
+          {chainId === 10143 && <span className="network-badge simulation">🔧 Simulation Mode</span>}
+          {(chainId === 11155111 || chainId === 1) && <span className="network-badge real">🔗 Real Delegation</span>}
+        </div>
         {isConnected && address && (
-          <span style={{ marginLeft: '1rem' }}>
-            Wallet: <strong>{address.slice(0, 6)}...{address.slice(-4)}</strong>
-          </span>
+          <div className="wallet-info">
+            <span className="wallet-label">Wallet:</span>
+            <span className="wallet-address">{address.slice(0, 6)}...{address.slice(-4)}</span>
+          </div>
         )}
       </div>
 
       {/* Messages */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '1rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem'
-      }}>
+      <div className="messages-container">
         {messages.map((message, index) => (
           <div
             key={index}
-            style={{
-              display: 'flex',
-              gap: '0.75rem',
-              flexDirection: message.role === 'user' ? 'row-reverse' : 'row'
-            }}
+            className={`message-wrapper ${message.role === 'user' ? 'user-message' : 'assistant-message'}`}
           >
-            <div style={{
-              flexShrink: 0,
-              width: '2rem',
-              height: '2rem',
-              borderRadius: '9999px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: message.role === 'user' ? '#3b82f6' : '#10b981'
-            }}>
-              <span style={{ 
-                color: 'white', 
-                fontSize: '0.875rem',
-                fontWeight: 'bold'
-              }}>
+            <div className={`avatar ${message.role}`}>
+              <span className="avatar-text">
                 {message.role === 'user' ? 'U' : 'AI'}
               </span>
             </div>
-            <div style={{
-              maxWidth: '70%',
-              borderRadius: '0.5rem',
-              padding: '0.75rem',
-              backgroundColor: message.role === 'user' 
-                ? '#3b82f6' 
-                : '#f3f4f6',
-              color: message.role === 'user' ? 'white' : '#111827'
-            }}>
-              <p style={{ 
-                fontSize: '0.875rem', 
-                whiteSpace: 'pre-wrap',
-                margin: 0,
-                marginBottom: message.automation || message.requiresConfirmation ? '0.75rem' : '0'
-              }}>
+            <div className={`message-bubble ${message.role}`}>
+              <p className="message-content">
                 {message.content}
               </p>
               
               {/* Automation Preview */}
               {message.automation && (
-                <div style={{
-                  padding: '0.75rem',
-                  backgroundColor: message.role === 'user' ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
-                  borderRadius: '0.375rem',
-                  marginBottom: '0.75rem'
-                }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginBottom: '0.5rem'
-                  }}>
-                    <span style={{ fontSize: '1rem' }}>
+                <div className="automation-preview">
+                  <div className="automation-header">
+                    <span className="automation-icon">
                       {getAutomationIcon(message.automation.type)}
                     </span>
-                    <strong style={{ fontSize: '0.875rem' }}>
-                    {message.automation.type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                    <strong className="automation-title">
+                      {message.automation.type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
                     </strong>
                   </div>
-                  <p style={{ 
-                    fontSize: '0.75rem', 
-                    color: message.role === 'user' ? 'rgba(255,255,255,0.8)' : '#6b7280',
-                    margin: 0,
-                    marginBottom: '0.5rem'
-                  }}>
+                  <p className="automation-description">
                     {message.automation.description}
                   </p>
-                  <div style={{ 
-                    fontSize: '0.7rem', 
-                    color: message.role === 'user' ? 'rgba(255,255,255,0.6)' : '#9ca3af'
-                  }}>
-                    Status: <strong style={{
-                      color: message.automation.status === 'active' ? '#10b981' : 
-                             message.automation.status === 'activating' ? '#f59e0b' : 
-                             message.automation.status === 'pending' ? '#6b7280' : '#ef4444'
-                    }}>{message.automation.status.toUpperCase()}</strong>
+                  <div className="automation-details">
+                    <span className="status-label">Status:</span>
+                    <span className={`status-badge ${message.automation.status}`}>
+                      {message.automation.status.toUpperCase()}
+                    </span>
                     {message.automation.delegationId && (
-                      <div>Delegation: {message.automation.delegationId.slice(0, 8)}...</div>
+                      <div className="delegation-info">
+                        Delegation: {message.automation.delegationId.slice(0, 8)}...
+                      </div>
                     )}
                     {message.automation.transactionHash && (
-                      <div>Tx: {message.automation.transactionHash.slice(0, 8)}...</div>
+                      <div className="transaction-info">
+                        Tx: {message.automation.transactionHash.slice(0, 8)}...
+                      </div>
                     )}
                   </div>
                 </div>
@@ -454,27 +409,7 @@ export default function ChatBox() {
                 <button
                   onClick={() => handleConfirmAutomation(message.automation.id)}
                   disabled={!isConnected || !address}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    backgroundColor: (!isConnected || !address) ? '#9ca3af' : '#10b981',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '0.375rem',
-                    fontSize: '0.75rem',
-                    fontWeight: '500',
-                    cursor: (!isConnected || !address) ? 'not-allowed' : 'pointer',
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseOver={(e) => {
-                    if (isConnected && address) {
-                      e.currentTarget.style.backgroundColor = '#059669'
-                    }
-                  }}
-                  onMouseOut={(e) => {
-                    if (isConnected && address) {
-                      e.currentTarget.style.backgroundColor = '#10b981'
-                    }
-                  }}
+                  className={`confirm-button ${!isConnected || !address ? 'disabled' : ''}`}
                 >
                   {!isConnected ? '🔒 Connect Wallet First' : 
                    !address ? '⏳ Connecting...' : 
@@ -483,51 +418,17 @@ export default function ChatBox() {
               )}
 
               {message.pending && (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  fontSize: '0.75rem',
-                  color: message.role === 'user' ? 'rgba(255,255,255,0.7)' : '#6b7280'
-                }}>
-                  <div style={{
-                    display: 'flex',
-                    gap: '0.25rem'
-                  }}>
-                    <div style={{
-                      width: '0.375rem',
-                      height: '0.375rem',
-                      backgroundColor: 'currentColor',
-                      borderRadius: '9999px',
-                      animation: 'bounce 1.4s infinite ease-in-out both'
-                    }}></div>
-                    <div style={{
-                      width: '0.375rem',
-                      height: '0.375rem',
-                      backgroundColor: 'currentColor',
-                      borderRadius: '9999px',
-                      animation: 'bounce 1.4s infinite ease-in-out both',
-                      animationDelay: '0.16s'
-                    }}></div>
-                    <div style={{
-                      width: '0.375rem',
-                      height: '0.375rem',
-                      backgroundColor: 'currentColor',
-                      borderRadius: '9999px',
-                      animation: 'bounce 1.4s infinite ease-in-out both',
-                      animationDelay: '0.32s'
-                    }}></div>
+                <div className="loading-indicator">
+                  <div className="loading-dots">
+                    <div className="dot"></div>
+                    <div className="dot"></div>
+                    <div className="dot"></div>
                   </div>
-                  Processing...
+                  <span>Processing...</span>
                 </div>
               )}
 
-              <p style={{ 
-                fontSize: '0.75rem', 
-                margin: 0,
-                marginTop: '0.5rem',
-                color: message.role === 'user' ? 'rgba(255,255,255,0.7)' : '#6b7280'
-              }}>
+              <p className="message-timestamp">
                 {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
@@ -537,79 +438,383 @@ export default function ChatBox() {
       </div>
 
       {/* Input */}
-      <div style={{
-        borderTop: '1px solid #e5e7eb',
-        padding: '1rem'
-      }}>
-        <div style={{
-          display: 'flex',
-          gap: '0.5rem'
-        }}>
+      <div className="input-container">
+        <div className="input-wrapper">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Type your automation command... (e.g., 'Send 0.01 ETH to vitalik.eth every Friday at 2 PM')"
-            style={{
-              flex: 1,
-              padding: '0.5rem 0.75rem',
-              border: '1px solid #d1d5db',
-              borderRadius: '0.5rem',
-              fontSize: '0.875rem',
-              resize: 'none',
-              minHeight: '2.5rem',
-              maxHeight: '6rem',
-              outline: 'none',
-              fontFamily: 'inherit'
-            }}
+            className="chat-input"
             rows={2}
             disabled={isLoading || !isConnected}
           />
           <button
             onClick={handleSend}
             disabled={isLoading || !input.trim() || !isConnected}
-            style={{
-              alignSelf: 'flex-end',
-              padding: '0.5rem',
-              backgroundColor: (isLoading || !input.trim() || !isConnected) ? '#9ca3af' : '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '0.5rem',
-              cursor: (isLoading || !input.trim() || !isConnected) ? 'not-allowed' : 'pointer',
-              transition: 'background-color 0.2s',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: '2.5rem',
-              minHeight: '2.5rem'
-            }}
-            onMouseOver={(e) => {
-              if (!isLoading && input.trim() && isConnected) {
-                e.currentTarget.style.backgroundColor = '#2563eb'
-              }
-            }}
-            onMouseOut={(e) => {
-              if (!isLoading && input.trim() && isConnected) {
-                e.currentTarget.style.backgroundColor = '#3b82f6'
-              }
-            }}
+            className="send-button"
           >
-            <span style={{ fontSize: '1rem' }}>➤</span>
+            <span className="send-icon">➤</span>
           </button>
         </div>
         {!isConnected && (
-          <div style={{
-            fontSize: '0.75rem',
-            color: '#dc2626',
-            marginTop: '0.5rem',
-            textAlign: 'center'
-          }}>
+          <div className="connection-warning-text">
             🔒 Connect your wallet to use the chat
           </div>
         )}
       </div>
 
       <style jsx>{`
+        .chat-container {
+          display: flex;
+          flex-direction: column;
+          height: 24rem;
+          background: var(--color-white);
+          border-radius: var(--radius-xl);
+          box-shadow: var(--shadow-md);
+          border: 1px solid var(--color-coral);
+          overflow: hidden;
+        }
+
+        .connection-status {
+          padding: 0.75rem 1rem;
+          font-size: 0.75rem;
+          text-align: center;
+          border-bottom: 1px solid;
+        }
+
+        .connection-error {
+          background-color: #fef2f2;
+          border-color: #fecaca;
+          color: #dc2626;
+        }
+
+        .connection-warning {
+          background-color: #fffbeb;
+          border-color: #fed7aa;
+          color: #ea580c;
+        }
+
+        .network-info {
+          padding: 0.75rem 1rem;
+          background: var(--color-sand);
+          border-bottom: 1px solid var(--color-coral);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 0.75rem;
+          color: var(--color-root-600);
+        }
+
+        .network-status, .wallet-info {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .network-label, .wallet-label {
+          color: var(--color-root-500);
+        }
+
+        .network-name, .wallet-address {
+          font-weight: 600;
+          color: var(--color-root-700);
+        }
+
+        .network-badge {
+          padding: 0.25rem 0.5rem;
+          border-radius: var(--radius-sm);
+          font-size: 0.7rem;
+          font-weight: 500;
+        }
+
+        .network-badge.simulation {
+          background: var(--color-warning);
+          color: white;
+        }
+
+        .network-badge.real {
+          background: var(--color-success);
+          color: white;
+        }
+
+        .messages-container {
+          flex: 1;
+          overflow-y: auto;
+          padding: 1rem;
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+          background: var(--color-background);
+        }
+
+        .message-wrapper {
+          display: flex;
+          gap: 0.75rem;
+        }
+
+        .user-message {
+          flex-direction: row-reverse;
+        }
+
+        .assistant-message {
+          flex-direction: row;
+        }
+
+        .avatar {
+          flex-shrink: 0;
+          width: 2.5rem;
+          height: 2.5rem;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 600;
+          font-size: 0.875rem;
+          box-shadow: var(--shadow-sm);
+        }
+
+        .avatar.user {
+          background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-400) 100%);
+          color: white;
+        }
+
+        .avatar.assistant {
+          background: linear-gradient(135deg, var(--color-root) 0%, var(--color-root-400) 100%);
+          color: white;
+        }
+
+        .message-bubble {
+          max-width: 70%;
+          border-radius: var(--radius-lg);
+          padding: 1rem;
+          box-shadow: var(--shadow-sm);
+          transition: all 0.2s ease;
+        }
+
+        .message-bubble.user {
+          background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-400) 100%);
+          color: white;
+          border-bottom-right-radius: var(--radius-sm);
+        }
+
+        .message-bubble.assistant {
+          background: var(--color-white);
+          color: var(--color-root-700);
+          border: 1px solid var(--color-coral);
+          border-bottom-left-radius: var(--radius-sm);
+        }
+
+        .message-content {
+          font-size: 0.875rem;
+          white-space: pre-wrap;
+          margin: 0;
+          margin-bottom: 0.75rem;
+          line-height: 1.5;
+        }
+
+        .automation-preview {
+          padding: 0.75rem;
+          background: var(--message-role === 'user' ? 'rgba(255,255,255,0.1)' : 'var(--color-sand)');
+          border-radius: var(--radius-md);
+          margin-bottom: 0.75rem;
+          border: 1px solid var(--color-coral);
+        }
+
+        .automation-header {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          margin-bottom: 0.5rem;
+        }
+
+        .automation-icon {
+          font-size: 1rem;
+        }
+
+        .automation-title {
+          font-size: 0.875rem;
+          color: inherit;
+        }
+
+        .automation-description {
+          font-size: 0.75rem;
+          color: inherit;
+          opacity: 0.8;
+          margin: 0;
+          margin-bottom: 0.5rem;
+          line-height: 1.4;
+        }
+
+        .automation-details {
+          font-size: 0.7rem;
+          opacity: 0.7;
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+
+        .status-label {
+          margin-right: 0.5rem;
+        }
+
+        .status-badge {
+          font-weight: 600;
+          padding: 0.125rem 0.375rem;
+          border-radius: var(--radius-sm);
+          font-size: 0.65rem;
+        }
+
+        .status-badge.active {
+          background: var(--color-success);
+          color: white;
+        }
+
+        .status-badge.activating {
+          background: var(--color-warning);
+          color: white;
+        }
+
+        .status-badge.pending {
+          background: var(--color-gray-400);
+          color: white;
+        }
+
+        .confirm-button {
+          padding: 0.75rem 1.5rem;
+          background: linear-gradient(135deg, var(--color-success) 0%, #059669 100%);
+          color: white;
+          border: none;
+          border-radius: var(--radius-md);
+          font-size: 0.8rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          box-shadow: var(--shadow-sm);
+        }
+
+        .confirm-button:hover:not(.disabled) {
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-md);
+        }
+
+        .confirm-button.disabled {
+          background: var(--color-gray-400);
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
+        }
+
+        .loading-indicator {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.75rem;
+          opacity: 0.7;
+        }
+
+        .loading-dots {
+          display: flex;
+          gap: 0.25rem;
+        }
+
+        .dot {
+          width: 0.375rem;
+          height: 0.375rem;
+          background-color: currentColor;
+          border-radius: 50%;
+          animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .dot:nth-child(1) { animation-delay: -0.32s; }
+        .dot:nth-child(2) { animation-delay: -0.16s; }
+
+        .message-timestamp {
+          font-size: 0.75rem;
+          margin: 0;
+          margin-top: 0.5rem;
+          opacity: 0.6;
+        }
+
+        .input-container {
+          border-top: 1px solid var(--color-coral);
+          padding: 1rem;
+          background: var(--color-white);
+        }
+
+        .input-wrapper {
+          display: flex;
+          gap: 0.75rem;
+          align-items: flex-end;
+        }
+
+        .chat-input {
+          flex: 1;
+          padding: 0.75rem 1rem;
+          border: 1.5px solid var(--color-coral);
+          border-radius: var(--radius-lg);
+          font-size: 0.875rem;
+          resize: none;
+          min-height: 2.5rem;
+          max-height: 6rem;
+          outline: none;
+          font-family: inherit;
+          background: var(--color-white);
+          transition: all 0.2s ease;
+        }
+
+        .chat-input:focus {
+          border-color: var(--color-ocean);
+          box-shadow: 0 0 0 3px var(--color-ocean-50);
+        }
+
+        .chat-input:disabled {
+          background: var(--color-gray-50);
+          color: var(--color-gray-400);
+          cursor: not-allowed;
+        }
+
+        .send-button {
+          align-self: flex-end;
+          padding: 0.75rem;
+          background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-400) 100%);
+          color: white;
+          border: none;
+          border-radius: var(--radius-lg);
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justifyify-content: center;
+          min-width: 3rem;
+          min-height: 3rem;
+          box-shadow: var(--shadow-sm);
+        }
+
+        .send-button:hover:not(:disabled) {
+          transform: translateY(-1px) scale(1.05);
+          box-shadow: var(--shadow-md);
+        }
+
+        .send-button:disabled {
+          background: var(--color-gray-300);
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
+        }
+
+        .send-icon {
+          font-size: 1rem;
+          font-weight: bold;
+        }
+
+        .connection-warning-text {
+          font-size: 0.75rem;
+          color: var(--color-error);
+          margin-top: 0.5rem;
+          text-align: center;
+        }
+
         @keyframes bounce {
           0%, 80%, 100% {
             transform: scale(0);

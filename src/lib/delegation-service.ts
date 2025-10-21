@@ -7,8 +7,8 @@ import {
   type Delegation,
   type ExecutionStruct,
 } from '@metamask/delegation-utils';
-import { type WalletClient, getAddress } from 'viem';
-import { getWalletConnectSigner, isWalletConnectConnected } from '@/lib/walletconnect-signer';
+import { type WalletClient, getAddress, createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
 
 export interface DelegationResult {
   success: boolean;
@@ -18,6 +18,9 @@ export interface DelegationResult {
   delegation?: Delegation;
   chainId?: number;
   isSimulated?: boolean;
+  usedWalletConnect?: boolean;
+  walletType?: 'eoa' | 'scw' | 'unknown';
+  userMessage?: string; // Changed from 'message' to 'userMessage'
 }
 
 export class DelegationService {
@@ -40,6 +43,81 @@ export class DelegationService {
   }
 
   /**
+   * Detect if an address is a smart contract wallet
+   */
+  private async isSmartContractWallet(address: string, chainId: number): Promise<boolean> {
+    try {
+      console.log('🔍 Checking if wallet is smart contract...');
+      
+      // Create a public client to check bytecode (WalletClient doesn't have getBytecode)
+      const publicClient = createPublicClient({
+        chain: mainnet, // Use mainnet as fallback, or you can make this chain-specific
+        transport: http()
+      });
+      
+      // Check if the address has contract code
+      const code = await publicClient.getBytecode({ address: address as `0x${string}` });
+      const isSCW = code !== undefined && code !== '0x';
+      
+      console.log(`🏷️ Wallet type: ${isSCW ? 'Smart Contract Wallet' : 'EOA (External Owned Account)'}`);
+      return isSCW;
+      
+    } catch (error) {
+      console.warn('⚠️ Could not determine wallet type:', error);
+      return false; // Default to EOA on error
+    }
+  }
+
+  /**
+   * Test if wallet can sign EIP-712 data (required for delegations)
+   */
+  private async canSignDelegations(walletClient: WalletClient, chainId: number): Promise<boolean> {
+    try {
+      if (!walletClient.account) {
+        console.log('❌ No wallet account available for signing test');
+        return false;
+      }
+
+      console.log('🧪 Testing wallet delegation signing capability...');
+      
+      // Simple EIP-712 test that matches delegation structure
+      const testTypedData = {
+        domain: {
+          name: 'AutoPayAI-Test',
+          version: '1.0.0',
+          chainId: chainId,
+          verifyingContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+        },
+        types: {
+          TestDelegation: [
+            { name: 'delegate', type: 'address' },
+            { name: 'authority', type: 'bytes32' },
+          ],
+        },
+        primaryType: 'TestDelegation' as const,
+        message: {
+          delegate: walletClient.account.address,
+          authority: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+        },
+      };
+
+      await walletClient.signTypedData({
+        account: walletClient.account,
+        ...testTypedData,
+      });
+      
+      console.log('✅ Wallet can sign delegation data');
+      return true;
+      
+    } catch (error) {
+      // Fix the 'error is unknown' issue
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log('❌ Wallet cannot sign delegation data:', errorMessage);
+      return false;
+    }
+  }
+
+  /**
    * Create and sign a delegation, or simulate one if unsupported chain (e.g., Monad)
    */
   async createSignedDelegation(
@@ -55,165 +133,160 @@ export class DelegationService {
       // 🧪 SIMULATION MODE (Monad or unsupported chains)
       if (!isSupported) {
         console.log(`🧪 Simulation mode active for unsupported chain ${chainId}`);
-        return this.createSimulatedDelegation(userAddress, chainId);
-      }
-
-      // ✅ REAL DELEGATION FLOW
-      const environment = getDeleGatorEnvironment(chainId);
-      if (!environment || !environment.DelegationManager) {
-        console.warn(`⚠️ No DelegationManager found for chain ${chainId}`);
-        return this.createSimulatedDelegation(userAddress, chainId);
-      }
-
-      console.log('🏗️ Creating base delegation structure...');
-
-      // Create delegation with proper structure
-      const emptyDelegation = createDelegation({
-        to: userAddress as `0x${string}`,
-        from: userAddress as `0x${string}`,
-        parentDelegation: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
-        caveats: []
-      });
-
-      emptyDelegation.salt = `0x${Math.random().toString(16).substring(2, 18).padEnd(64, '0')}`;
-      
-      console.log('🧩 Base delegation structure created:', emptyDelegation);
-
-      // Verify the delegation has proper addresses
-      if (!emptyDelegation.delegate || !emptyDelegation.authority) {
-        console.error('❌ Delegation missing required address fields');
-        return this.createSimulatedDelegation(userAddress, chainId);
-      }
-
-      console.log('🔍 Wallet client account:', walletClient.account);
-
-      if (!walletClient.account) {
-        throw new Error('Wallet client missing account information');
-      }
-
-      // 🔁 Try to detect if current wallet can sign delegations
-      let signerClient = walletClient;
-      let usingWalletConnect = false;
-
-      try {
-        // Test if the wallet can sign typed data (delegations use EIP-712)
-        console.log('🧪 Testing wallet delegation signing capability...');
-        
-        const testTypedData = {
-          domain: {
-            name: 'AutoPayAI',
-            version: '1.0.0',
-            chainId: chainId,
-            verifyingContract: environment.DelegationManager,
-          },
-          types: {
-            Delegation: [
-              { name: 'delegate', type: 'address' },
-              { name: 'authority', type: 'bytes32' },
-              { name: 'caveats', type: 'Caveat[]' },
-              { name: 'salt', type: 'bytes32' },
-            ],
-            Caveat: [
-              { name: 'enforcer', type: 'address' },
-              { name: 'terms', type: 'bytes' },
-            ],
-          },
-          primaryType: 'Delegation' as const,
-          message: {
-            delegate: emptyDelegation.delegate,
-            authority: emptyDelegation.authority,
-            caveats: emptyDelegation.caveats,
-            salt: emptyDelegation.salt,
-          },
+        const simulated = await this.createSimulatedDelegation(userAddress, chainId, 'unsupported_chain');
+        return {
+          ...simulated,
+          userMessage: this.getSimulationMessage(false, userAddress) // false = not SCW
         };
-
-        await walletClient.signTypedData({
-          account: walletClient.account,
-          ...testTypedData,
-        });
-        
-        console.log('✅ Current wallet can sign delegations');
-        
-      } catch (testError) {
-        console.warn('⚠️ Current wallet cannot sign delegations:', testError);
-        console.log('🔄 Switching to WalletConnect signer...');
-        
-        // Switch to WalletConnect
-        signerClient = await getWalletConnectSigner(chainId);
-        usingWalletConnect = true;
-        
-        if (!signerClient.account) {
-          throw new Error('WalletConnect failed to connect');
-        }
-        
-        console.log('✅ WalletConnect signer ready:', signerClient.account.address);
       }
 
-      console.log('✍️ Attempting to sign delegation...');
-      console.log('🏢 DelegationManager:', environment.DelegationManager);
-      console.log('🔐 Signer:', usingWalletConnect ? 'WalletConnect' : 'Primary Wallet');
+      // 🔍 DETECT SMART CONTRACT WALLETS EARLY
+      const isSCW = await this.isSmartContractWallet(userAddress, chainId);
+      const canSign = await this.canSignDelegations(walletClient, chainId);
 
-      console.log('🔐 Starting signDelegation call...');
+      if (isSCW || !canSign) {
+        console.log(`🔒 Smart contract wallet or non-signing wallet detected - using simulation mode`);
+        console.log(`📊 Wallet details: SCW=${isSCW}, CanSign=${canSign}`);
+        
+        const simulated = await this.createSimulatedDelegation(
+          userAddress, 
+          chainId, 
+          isSCW ? 'smart_contract_wallet' : 'signing_unsupported'
+        );
+        
+        return {
+          ...simulated,
+          userMessage: this.getSimulationMessage(isSCW, userAddress)
+        };
+      }
 
-      // Add a timeout to prevent hanging
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Signing timed out after 30 seconds')), 30000);
-      });
-
-      // Create a proper signer with guaranteed account
-      const signer = {
-        ...signerClient,
-        account: {
-          address: usingWalletConnect ? signerClient.account!.address : userAddress,
-          type: 'json-rpc' as const,
-        },
-      };
-
-      const signature = await Promise.race([
-        signDelegation({
-          signer: signer as any,
-          delegation: emptyDelegation,
-          delegationManager: environment.DelegationManager,
-          chainId,
-          name: 'AutoPayAI',
-          version: '1.0.0'
-        }),
-        timeoutPromise
-      ]);
+      // ✅ REAL DELEGATION FLOW (only for EOA wallets that can sign)
+      console.log('✅ Proceeding with real delegation for EOA wallet');
+      return await this.createRealDelegation(automation, walletClient, userAddress, chainId);
       
-      console.log('✅ Signature obtained:', signature);
-
-      const signedDelegation: Delegation = {
-        ...emptyDelegation,
-        signature,
-      };
-
-      const delegationId = getDelegationHashOffchain(signedDelegation);
-      console.log('📋 Delegation ID:', delegationId);
-
-      return {
-        success: true,
-        delegationId,
-        delegation: signedDelegation,
-        chainId,
-        isSimulated: false,
-        // Add flag to indicate WalletConnect was used
-        ...(usingWalletConnect && { usedWalletConnect: true })
-      };
     } catch (error) {
       console.error('❌ Delegation signing failed:', error);
       
       // Use simulation mode directly instead of recursive call
       console.log('🔄 Using simulation mode due to signing failure');
-      return this.createSimulatedDelegation(userAddress, chainId);
+      const simulated = await this.createSimulatedDelegation(userAddress, chainId, 'error_fallback');
+      return {
+        ...simulated,
+        userMessage: 'An unexpected error occurred. Using simulation mode.'
+      };
+    }
+  }
+
+  /**
+   * Real delegation flow for EOA wallets
+   */
+  private async createRealDelegation(
+    automation: any,
+    walletClient: WalletClient,
+    userAddress: string,
+    chainId: number
+  ): Promise<DelegationResult> {
+    const environment = getDeleGatorEnvironment(chainId);
+    if (!environment || !environment.DelegationManager) {
+      console.warn(`⚠️ No DelegationManager found for chain ${chainId}`);
+      const simulated = await this.createSimulatedDelegation(userAddress, chainId, 'no_delegation_manager');
+      return {
+        ...simulated,
+        userMessage: 'Network not configured for delegations. Using simulation mode.'
+      };
+    }
+
+    console.log('🏗️ Creating base delegation structure...');
+
+    // Create delegation with proper structure
+    const emptyDelegation = createDelegation({
+      to: userAddress as `0x${string}`,
+      from: userAddress as `0x${string}`,
+      parentDelegation: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      caveats: []
+    });
+
+    emptyDelegation.salt = `0x${Math.random().toString(16).substring(2, 18).padEnd(64, '0')}`;
+    
+    console.log('🧩 Base delegation structure created');
+
+    // Verify the delegation has proper addresses
+    if (!emptyDelegation.delegate || !emptyDelegation.authority) {
+      console.error('❌ Delegation missing required address fields');
+      const simulated = await this.createSimulatedDelegation(userAddress, chainId, 'invalid_delegation');
+      return {
+        ...simulated,
+        userMessage: 'Invalid delegation structure. Using simulation mode.'
+      };
+    }
+
+    console.log('🔍 Wallet client account:', walletClient.account);
+
+    if (!walletClient.account) {
+      throw new Error('Wallet client missing account information');
+    }
+
+    console.log('✍️ Attempting to sign delegation...');
+    console.log('🏢 DelegationManager:', environment.DelegationManager);
+
+    // Add a timeout to prevent hanging
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Signing timed out after 30 seconds')), 30000);
+    });
+
+    const signature = await Promise.race([
+      signDelegation({
+        signer: walletClient as any,
+        delegation: emptyDelegation,
+        delegationManager: environment.DelegationManager,
+        chainId,
+        name: 'AutoPayAI',
+        version: '1.0.0'
+      }),
+      timeoutPromise
+    ]);
+    
+    console.log('✅ Signature obtained');
+
+    const signedDelegation: Delegation = {
+      ...emptyDelegation,
+      signature,
+    };
+
+    const delegationId = getDelegationHashOffchain(signedDelegation);
+    console.log('📋 Delegation ID:', delegationId);
+
+    return {
+      success: true,
+      delegationId,
+      delegation: signedDelegation,
+      chainId,
+      isSimulated: false,
+      walletType: 'eoa',
+      userMessage: '✅ Real delegation created successfully!'
+    };
+  }
+
+  /**
+   * Get user-friendly simulation message
+   */
+  private getSimulationMessage(isSCW: boolean, userAddress: string): string {
+    if (isSCW) {
+      return `🔒 Smart Contract Wallet Detected\n\nYour wallet (${userAddress.slice(0, 8)}...) appears to be a smart contract wallet. \n\nSmart contract wallets currently work in simulation mode only. For real on-chain automations with actual fund movements, please use an EOA wallet like:\n\n• MetaMask\n• Rainbow\n• Trust Wallet\n• Coinbase Wallet\n\nYour automation will work in simulation mode for testing purposes.`;
+    } else {
+      return `🔒 Signing Not Supported\n\nYour current wallet doesn't support the required signing method for on-chain delegations. \n\nPlease try with a different wallet provider that supports EIP-712 signing, or continue with simulation mode for testing.`;
     }
   }
 
   /**
    * FIXED: Helper method to create simulated delegations with proper delegation ID
    */
-  private createSimulatedDelegation(userAddress: string, chainId: number): DelegationResult {
-    console.log(`🧪 Creating simulated delegation for chain ${chainId}`);
+  private async createSimulatedDelegation(
+    userAddress: string, 
+    chainId: number, 
+    reason: string
+  ): Promise<DelegationResult> {
+    console.log(`🧪 Creating simulated delegation for chain ${chainId} (reason: ${reason})`);
     
     try {
       // Create a proper delegation structure that matches the expected format
@@ -230,7 +303,6 @@ export class DelegationService {
       const delegationId = getDelegationHashOffchain(mockDelegation);
       
       console.log('📋 Simulated Delegation ID:', delegationId);
-      console.log('🔍 Mock delegation structure:', mockDelegation);
 
       return {
         success: true,
@@ -238,6 +310,7 @@ export class DelegationService {
         delegation: mockDelegation,
         chainId,
         isSimulated: true,
+        walletType: reason === 'smart_contract_wallet' ? 'scw' : 'unknown'
       };
     } catch (error) {
       console.error('❌ Failed to create simulated delegation:', error);
@@ -251,6 +324,7 @@ export class DelegationService {
         delegation: {} as Delegation,
         chainId,
         isSimulated: true,
+        walletType: 'unknown'
       };
     }
   }

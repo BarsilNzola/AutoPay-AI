@@ -9,8 +9,8 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'AutoPay AI - Smart Wallet Assistant',
-  description: 'Automate your on-chain tasks with AI-powered wallet automation',
+  title: 'AutoPay AI - Smart Wallet Automation',
+  description: 'Automate your on-chain tasks with AI-powered wallet automation. Set up recurring payments, automatic claims, and scheduled operations.',
 }
 
 export default function RootLayout({
@@ -19,13 +19,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" style={inter.style}>
-      <body style={{
-        margin: 0,
-        padding: 0,
-        minHeight: '100vh',
-        background: 'linear-gradient(to bottom right, #dbeafe, #e0e7ff)'
-      }}>
+    <html lang="en" className={inter.className}>
+      <body className="app-body">
         <Providers>
           {children}
         </Providers>

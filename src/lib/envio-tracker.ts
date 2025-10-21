@@ -1,6 +1,3 @@
-// Simplified Envio tracker that only uses HTTP mode (no native binaries)
-// This works in browser environments like Netlify
-
 interface AutomationEvent {
   automationId: string;
   userAddress: string;
@@ -61,7 +58,7 @@ export class EnvioTracker {
   ];
 
   constructor() {
-    this.apiKey = process.env.ENVIO_API_KEY || '';
+    this.apiKey = process.env.NEXT_PUBLIC_ENVIO_API_KEY || '';
     this.isEnabled = !!this.apiKey;
     
     if (!this.isEnabled) {

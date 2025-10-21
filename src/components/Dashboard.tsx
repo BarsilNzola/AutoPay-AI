@@ -8,8 +8,8 @@ import { getTransactionHistoryFromEnvio, getAutomationHistoryFromEnvio } from '@
 
 export default function Dashboard() {
   const { address } = useAccount()
-  const chainId = useChainId() // Get current chain ID
-  const config = useConfig() // Get wagmi config
+  const chainId = useChainId()
+  const config = useConfig()
   const { data: balance } = useBalance({
     address,
     chainId: monadTestnet.id,
@@ -33,12 +33,10 @@ export default function Dashboard() {
     }
   }, [address])
 
-  // Listen for automation updates from chatbox
   useEffect(() => {
     const handleAutomationUpdate = () => {
       console.log('Automation update event received, refreshing...')
       loadUserAutomations()
-      // Also refresh history when new automations are created
       if (showHistory) {
         loadHistoryData()
       }
@@ -51,7 +49,6 @@ export default function Dashboard() {
     }
   }, [showHistory])
 
-  // Load history data when section is opened
   useEffect(() => {
     if (showHistory && address) {
       loadHistoryData()
@@ -77,19 +74,15 @@ export default function Dashboard() {
     }
   }
 
-  // Get chains where user has automations
   const getUserActiveChains = (): number[] => {
     const chains = [...new Set(automations.map(auto => auto.chainId).filter(Boolean))] as number[]
     return chains.length > 0 ? chains : [chainId || 10143]
   }
 
-  // Get chain name from chain ID
   const getChainName = (chainId: number): string => {
-    // Try to get chain name from wagmi config
     const chain = config.chains.find(c => c.id === chainId)
     if (chain) return chain.name
     
-    // Fallback to our mapping
     switch (chainId) {
       case 10143: return 'Monad Testnet'
       case 11155111: return 'Sepolia'
@@ -107,7 +100,6 @@ export default function Dashboard() {
 
     setHistoryData(prev => ({ ...prev, isLoading: true }))
     try {
-      // Get chains where user has activity
       const userChains = getUserActiveChains()
       const currentChainId = chainId || 10143
       
@@ -146,7 +138,6 @@ export default function Dashboard() {
   }
 
   const handleCreateFirstAutomation = () => {
-    // Focus the chat input if it exists
     const chatInput = document.querySelector('textarea') as HTMLTextAreaElement
     if (chatInput) {
       chatInput.focus()
@@ -156,11 +147,11 @@ export default function Dashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'active': return { bg: '#d1fae5', text: '#065f46' }
-      case 'pending': return { bg: '#fef3c7', text: '#92400e' }
-      case 'completed': return { bg: '#dbeafe', text: '#1e40af' }
-      case 'failed': return { bg: '#fee2e2', text: '#991b1b' }
-      default: return { bg: '#f3f4f6', text: '#374151' }
+      case 'active': return { backgroundColor: 'var(--color-success)', color: 'white' }
+      case 'pending': return { backgroundColor: 'var(--color-warning)', color: 'white' }
+      case 'completed': return { backgroundColor: 'var(--color-ocean-200)', color: 'var(--color-ocean-700)' }
+      case 'failed': return { backgroundColor: 'var(--color-error)', color: 'white' }
+      default: return { backgroundColor: 'var(--color-gray-200)', color: 'var(--color-gray-700)' }
     }
   }
 
@@ -195,23 +186,26 @@ export default function Dashboard() {
     return eth.toFixed(6)
   }
 
-  const getChainBadgeColor = (chainId: number) => {
+  const getChainBadgeStyle = (chainId: number) => {
     switch (chainId) {
-      case 10143: return { bg: '#f0f9ff', text: '#0369a1', name: getChainName(chainId) }
-      case 11155111: return { bg: '#fef3c7', text: '#92400e', name: getChainName(chainId) }
-      case 1: return { bg: '#f3f4f6', text: '#374151', name: getChainName(chainId) }
-      case 137: return { bg: '#f0f9ff', text: '#0369a1', name: getChainName(chainId) }
-      case 42161: return { bg: '#fef3c7', text: '#92400e', name: getChainName(chainId) }
-      case 10: return { bg: '#fee2e2', text: '#991b1b', name: getChainName(chainId) }
-      case 8453: return { bg: '#f3f4f6', text: '#374151', name: getChainName(chainId) }
-      default: return { bg: '#f3f4f6', text: '#6b7280', name: getChainName(chainId) }
+      case 10143: return { backgroundColor: 'var(--color-ocean-100)', color: 'var(--color-ocean-700)' }
+      case 11155111: return { backgroundColor: 'var(--color-root-100)', color: 'var(--color-root-700)' }
+      case 1: return { backgroundColor: 'var(--color-gray-100)', color: 'var(--color-gray-700)' }
+      case 137: return { backgroundColor: 'var(--color-ocean-50)', color: 'var(--color-ocean-600)' }
+      case 42161: return { backgroundColor: 'var(--color-coral)', color: 'var(--color-root-700)' }
+      case 10: return { backgroundColor: 'var(--color-error)', color: 'white' }
+      case 8453: return { backgroundColor: 'var(--color-gray-200)', color: 'var(--color-gray-800)' }
+      default: return { backgroundColor: 'var(--color-gray-100)', color: 'var(--color-gray-600)' }
     }
+  }
+
+  const getChainBadgeName = (chainId: number): string => {
+    return getChainName(chainId)
   }
 
   const activeAutomations = automations.filter(auto => auto.status === 'active')
   const pendingAutomations = automations.filter(auto => auto.status === 'pending')
 
-  // Group automations by chain
   const automationsByChain = automations.reduce((acc, auto) => {
     const chainId = auto.chainId || 10143
     if (!acc[chainId]) acc[chainId] = []
@@ -220,243 +214,96 @@ export default function Dashboard() {
   }, {} as Record<number, Automation[]>)
 
   return (
-    <div style={{
-      backgroundColor: 'white',
-      borderRadius: '0.75rem',
-      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-      padding: '1.5rem'
-    }}>
-      <h2 style={{
-        fontSize: '1.5rem',
-        fontWeight: '600',
-        marginBottom: '1.5rem'
-      }}>Dashboard</h2>
+    <div className="dashboard-container">
+      <h2 className="dashboard-title">Dashboard</h2>
       
       {/* Wallet Info */}
-      <div style={{
-        marginBottom: '1.5rem',
-        padding: '1rem',
-        backgroundColor: '#f9fafb',
-        borderRadius: '0.5rem'
-      }}>
-        <h3 style={{
-          fontWeight: '500',
-          color: '#111827',
-          marginBottom: '0.5rem',
-          fontSize: 'clamp(0.875rem, 2.5vw, 1rem)'
-        }}>Wallet Info</h3>
-        <p style={{
-          fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-          color: '#4b5563',
-          wordBreak: 'break-all',
-          marginBottom: '0.5rem',
-          lineHeight: '1.4'
-        }}>
+      <div className="wallet-card">
+        <h3 className="wallet-title">Wallet Info</h3>
+        <p className="wallet-address">
           {address || 'Not connected'}
         </p>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '0.5rem'
-        }}>
-          <span style={{ 
-            color: '#4b5563',
-            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-          }}>Balance:</span>
-          <span style={{ 
-            fontWeight: '600',
-            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-            wordBreak: 'break-all'
-          }}>
+        <div className="wallet-balance">
+          <span className="balance-label">Balance:</span>
+          <span className="balance-amount">
             {balance ? `${parseFloat(balance.formatted).toFixed(4)} ${balance.symbol}` : 'Loading...'}
           </span>
         </div>
         {chainId && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            marginTop: '0.5rem',
-            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-            color: '#6b7280'
-          }}>
+          <div className="chain-info">
             <span>Connected to:</span>
-            <span style={{
-              padding: '0.25rem 0.5rem',
-              backgroundColor: getChainBadgeColor(chainId).bg,
-              color: getChainBadgeColor(chainId).text,
-              borderRadius: '0.25rem',
-              fontWeight: '500',
-              fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)'
-            }}>
-              {getChainBadgeColor(chainId).name}
+            <span 
+              className="chain-badge" 
+              style={getChainBadgeStyle(chainId)}
+            >
+              {getChainBadgeName(chainId)}
             </span>
           </div>
         )}
       </div>
 
       {/* Active Automations */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '1rem',
-          flexWrap: 'wrap',
-          gap: '0.5rem'
-        }}>
-          <h3 style={{
-            fontWeight: '500',
-            color: '#111827',
-            margin: 0,
-            fontSize: 'clamp(0.875rem, 2.5vw, 1rem)'
-          }}>Active Automations</h3>
-          <span style={{
-            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-            color: '#6b7280'
-          }}>
-            {automations.length} total
-          </span>
+      <div className="section">
+        <div className="section-header">
+          <h3 className="section-title">Active Automations</h3>
+          <span className="section-count">{automations.length} total</span>
         </div>
 
         {isLoading ? (
-          <div style={{
-            textAlign: 'center',
-            padding: '2rem',
-            color: '#6b7280',
-            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-          }}>
+          <div className="loading-state">
+            <div className="spinner"></div>
             Loading automations...
           </div>
         ) : automations.length === 0 ? (
-          <div style={{
-            textAlign: 'center',
-            color: '#6b7280',
-            padding: '2rem 1rem',
-            border: '2px dashed #d1d5db',
-            borderRadius: '0.5rem',
-            cursor: 'pointer',
-            transition: 'background-color 0.2s'
-          }}
-          onClick={handleCreateFirstAutomation}
-          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
-          onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+          <div 
+            className="empty-state"
+            onClick={handleCreateFirstAutomation}
           >
-            <div style={{ fontSize: 'clamp(1.5rem, 6vw, 2rem)', marginBottom: '0.5rem' }}>⏰</div>
-            <p style={{ 
-              fontWeight: '500', 
-              marginBottom: '0.5rem',
-              fontSize: 'clamp(0.875rem, 2.5vw, 1rem)'
-            }}>No automations yet</p>
-            <p style={{ 
-              fontSize: 'clamp(0.75rem, 2vw, 0.875rem)', 
-              marginBottom: '1rem',
-              lineHeight: '1.4'
-            }}>
+            <div className="empty-icon">⏰</div>
+            <p className="empty-title">No automations yet</p>
+            <p className="empty-description">
               Create your first automation with AI
             </p>
-            <button style={{
-              padding: '0.5rem 1rem',
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '0.375rem',
-              fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-              fontWeight: '500',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s'
-            }}
-            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
-            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
-            >
+            <button className="btn-primary">
               Get Started
             </button>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div className="automations-grid">
             {Object.entries(automationsByChain).slice(0, 3).flatMap(([chainId, chainAutomations]) =>
               chainAutomations.slice(0, 2).map((auto) => {
-                const statusColors = getStatusColor(auto.status)
-                const chainBadge = getChainBadgeColor(Number(chainId))
+                const statusStyle = getStatusColor(auto.status)
+                const chainStyle = getChainBadgeStyle(Number(chainId))
+                const chainName = getChainBadgeName(Number(chainId))
+                
                 return (
-                  <div key={auto.id} style={{
-                    padding: '0.75rem',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '0.5rem',
-                    marginBottom: '0.75rem'
-                  }}>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      marginBottom: '0.5rem',
-                      gap: '0.5rem',
-                      flexWrap: 'wrap'
-                    }}>
-                      <div style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: '0.5rem',
-                        flex: 1,
-                        minWidth: '120px'
-                      }}>
-                        <span style={{ 
-                          fontSize: 'clamp(0.875rem, 3vw, 1rem)',
-                          flexShrink: 0
-                        }}>{getAutomationIcon(auto.type)}</span>
-                        <span style={{ 
-                          fontWeight: '500', 
-                          fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                          wordBreak: 'break-word',
-                          lineHeight: '1.3'
-                        }}>
+                  <div key={auto.id} className="automation-card">
+                    <div className="automation-header">
+                      <div className="automation-info">
+                        <span className="automation-icon">{getAutomationIcon(auto.type)}</span>
+                        <span className="automation-name">
                           {auto.type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                         </span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
-                        <span style={{
-                          padding: '0.25rem 0.5rem',
-                          backgroundColor: chainBadge.bg,
-                          color: chainBadge.text,
-                          borderRadius: '0.25rem',
-                          fontSize: 'clamp(0.5rem, 1.2vw, 0.625rem)',
-                          fontWeight: '500',
-                          whiteSpace: 'nowrap'
-                        }}>
-                          {chainBadge.name}
+                      <div className="automation-badges">
+                        <span 
+                          className="chain-badge badge" 
+                          style={chainStyle}
+                        >
+                          {chainName}
                         </span>
-                        <span style={{
-                          padding: '0.25rem 0.5rem',
-                          backgroundColor: statusColors.bg,
-                          color: statusColors.text,
-                          borderRadius: '0.25rem',
-                          fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)',
-                          fontWeight: '500',
-                          whiteSpace: 'nowrap'
-                        }}>
+                        <span 
+                          className="status-badge badge"
+                          style={statusStyle}
+                        >
                           {auto.status.charAt(0).toUpperCase() + auto.status.slice(1)}
                         </span>
                       </div>
                     </div>
-                    <p style={{
-                      fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                      color: '#6b7280',
-                      marginBottom: '0.5rem',
-                      lineHeight: '1.4',
-                      wordBreak: 'break-word'
-                    }}>
+                    <p className="automation-description">
                       {auto.description}
                     </p>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)',
-                      color: '#9ca3af',
-                      flexWrap: 'wrap',
-                      gap: '0.5rem'
-                    }}>
+                    <div className="automation-footer">
                       <span>Created: {new Date(auto.createdAt).toLocaleDateString()}</span>
                       {auto.nextExecution && (
                         <span>Next: {new Date(auto.nextExecution).toLocaleDateString()}</span>
@@ -467,20 +314,7 @@ export default function Dashboard() {
               })
             )}
             {automations.length > 3 && (
-              <button style={{
-                width: '100%',
-                padding: '0.5rem',
-                backgroundColor: '#f3f4f6',
-                color: '#374151',
-                border: 'none',
-                borderRadius: '0.375rem',
-                fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s'
-              }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#e5e7eb'}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
-              >
+              <button className="view-all-btn">
                 View all {automations.length} automations
               </button>
             )}
@@ -489,260 +323,105 @@ export default function Dashboard() {
       </div>
 
       {/* Quick Stats */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{
-          fontWeight: '500',
-          color: '#111827',
-          marginBottom: '1rem',
-          fontSize: 'clamp(0.875rem, 2.5vw, 1rem)'
-        }}>Quick Stats</h3>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))',
-          gap: '0.75rem'
-        }}>
-          <div style={{
-            padding: '0.75rem',
-            backgroundColor: '#f0f9ff',
-            borderRadius: '0.5rem',
-            textAlign: 'center'
-          }}>
-            <div style={{ 
-              fontSize: 'clamp(1rem, 3vw, 1.25rem)', 
-              fontWeight: '600', 
-              color: '#0369a1' 
-            }}>
-              {activeAutomations.length}
-            </div>
-            <div style={{ 
-              fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)', 
-              color: '#0c4a6e' 
-            }}>Active</div>
+      <div className="section">
+        <h3 className="section-title">Quick Stats</h3>
+        <div className="stats-grid">
+          <div className="stat-card ocean">
+            <div className="stat-number">{activeAutomations.length}</div>
+            <div className="stat-label">Active</div>
           </div>
-          <div style={{
-            padding: '0.75rem',
-            backgroundColor: '#fef3c7',
-            borderRadius: '0.5rem',
-            textAlign: 'center'
-          }}>
-            <div style={{ 
-              fontSize: 'clamp(1rem, 3vw, 1.25rem)', 
-              fontWeight: '600', 
-              color: '#92400e' 
-            }}>
-              {pendingAutomations.length}
-            </div>
-            <div style={{ 
-              fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)', 
-              color: '#78350f' 
-            }}>Pending</div>
+          <div className="stat-card root">
+            <div className="stat-number">{pendingAutomations.length}</div>
+            <div className="stat-label">Pending</div>
           </div>
-          <div style={{
-            padding: '0.75rem',
-            backgroundColor: '#f0fdf4',
-            borderRadius: '0.5rem',
-            textAlign: 'center'
-          }}>
-            <div style={{ 
-              fontSize: 'clamp(1rem, 3vw, 1.25rem)', 
-              fontWeight: '600', 
-              color: '#166534' 
-            }}>
-              {automations.filter(a => a.status === 'completed').length}
-            </div>
-            <div style={{ 
-              fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)', 
-              color: '#166534' 
-            }}>Completed</div>
+          <div className="stat-card success">
+            <div className="stat-number">{automations.filter(a => a.status === 'completed').length}</div>
+            <div className="stat-label">Completed</div>
           </div>
-          <div style={{
-            padding: '0.75rem',
-            backgroundColor: '#faf5ff',
-            borderRadius: '0.5rem',
-            textAlign: 'center'
-          }}>
-            <div style={{ 
-              fontSize: 'clamp(1rem, 3vw, 1.25rem)', 
-              fontWeight: '600', 
-              color: '#7c3aed' 
-            }}>
-              {Object.keys(automationsByChain).length}
-            </div>
-            <div style={{ 
-              fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)', 
-              color: '#6b21a8' 
-            }}>Chains</div>
+          <div className="stat-card coral">
+            <div className="stat-number">{Object.keys(automationsByChain).length}</div>
+            <div className="stat-label">Chains</div>
           </div>
         </div>
       </div>
 
       {/* Quick Actions */}
-      <div>
-        <h3 style={{
-          fontWeight: '500',
-          color: '#111827',
-          marginBottom: '1rem',
-          fontSize: 'clamp(0.875rem, 2.5vw, 1rem)'
-        }}>Quick Actions</h3>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-          gap: '0.5rem'
-        }}>
+      <div className="section">
+        <h3 className="section-title">Quick Actions</h3>
+        <div className="actions-grid">
           <button
             onClick={handleViewHistory}
-            style={{
-              padding: '0.75rem',
-              backgroundColor: showHistory ? '#3b82f6' : '#f3f4f6',
-              color: showHistory ? 'white' : '#374151',
-              borderRadius: '0.375rem',
-              fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              fontWeight: '500',
-              whiteSpace: 'nowrap'
-            }}
+            className={`action-btn ${showHistory ? 'primary' : 'secondary'}`}
           >
             {showHistory ? 'Hide History' : 'View History'}
           </button>
           <button
             onClick={handleSettings}
-            style={{
-              padding: '0.75rem',
-              backgroundColor: '#f3f4f6',
-              color: '#374151',
-              borderRadius: '0.375rem',
-              fontSize: 'clamp(0.75rem, 2vw, 0.875rem)',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'background-color 0.2s',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.25rem',
-              fontWeight: '500',
-              whiteSpace: 'nowrap'
-            }}
+            className="action-btn secondary"
           >
-            ⚙️ Settings
+            <span className="btn-icon">⚙️</span>
+            Settings
           </button>
         </div>
 
         {/* Envio History Panel */}
         {showHistory && (
-          <div style={{
-            marginTop: '1rem',
-            padding: '1rem',
-            backgroundColor: '#f9fafb',
-            borderRadius: '0.5rem',
-            border: '1px solid #e5e7eb'
-          }}>
-            <h4 style={{
-              fontWeight: '500',
-              color: '#111827',
-              marginBottom: '1rem',
-              fontSize: 'clamp(0.875rem, 2.5vw, 1rem)'
-            }}>
+          <div className="history-panel">
+            <h4 className="history-title">
               📊 Multi-Chain History
             </h4>
 
             {historyData.isLoading ? (
-              <div style={{
-                textAlign: 'center',
-                padding: '2rem',
-                color: '#6b7280',
-                fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-              }}>
+              <div className="loading-state">
+                <div className="spinner"></div>
                 Loading history across {getUserActiveChains().length} chains...
               </div>
             ) : historyData.transactions.length === 0 && historyData.automationEvents.length === 0 ? (
-              <div style={{
-                textAlign: 'center',
-                color: '#6b7280',
-                padding: '2rem 1rem',
-                fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-              }}>
-                <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📊</div>
+              <div className="empty-history">
+                <div className="empty-icon">📊</div>
                 <p>No history data yet</p>
-                <p style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                <p className="empty-subtitle">
                   Your automation transactions and events will appear here
                 </p>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="history-content">
                 {/* Recent Transactions */}
                 {historyData.transactions.length > 0 && (
-                  <div>
-                    <h5 style={{
-                      fontWeight: '500',
-                      color: '#374151',
-                      marginBottom: '0.75rem',
-                      fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-                    }}>
+                  <div className="history-section">
+                    <h5 className="history-section-title">
                       Recent Transactions ({historyData.transactions.length})
                     </h5>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <div className="history-list">
                       {historyData.transactions.slice(0, 5).map((tx, index) => {
-                        const chainBadge = getChainBadgeColor(tx.chainId)
+                        const chainStyle = getChainBadgeStyle(tx.chainId)
+                        const chainName = getChainBadgeName(tx.chainId)
+                        
                         return (
-                          <div key={index} style={{
-                            padding: '0.75rem',
-                            backgroundColor: 'white',
-                            borderRadius: '0.375rem',
-                            border: '1px solid #e5e7eb',
-                            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-                          }}>
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              marginBottom: '0.25rem',
-                              flexWrap: 'wrap',
-                              gap: '0.5rem'
-                            }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <span>{getTransactionTypeIcon(tx.type || 'transaction')}</span>
-                                <span style={{ fontWeight: '500' }}>
+                          <div key={index} className="history-item">
+                            <div className="history-item-header">
+                              <div className="history-item-info">
+                                <span className="item-icon">{getTransactionTypeIcon(tx.type || 'transaction')}</span>
+                                <span className="item-title">
                                   {formatTransactionType(tx.type || 'transaction')}
                                 </span>
-                                <span style={{
-                                  padding: '0.125rem 0.375rem',
-                                  backgroundColor: chainBadge.bg,
-                                  color: chainBadge.text,
-                                  borderRadius: '0.25rem',
-                                  fontSize: 'clamp(0.5rem, 1.2vw, 0.625rem)',
-                                  fontWeight: '500'
-                                }}>
-                                  {chainBadge.name}
+                                <span 
+                                  className="chain-badge badge"
+                                  style={chainStyle}
+                                >
+                                  {chainName}
                                 </span>
                               </div>
-                              <span style={{
-                                color: '#059669',
-                                fontWeight: '500',
-                                fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-                              }}>
+                              <span className="item-value">
                                 {formatValue(tx.value || '0')} ETH
                               </span>
                             </div>
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)',
-                              color: '#6b7280',
-                              flexWrap: 'wrap',
-                              gap: '0.5rem'
-                            }}>
+                            <div className="history-item-footer">
                               <span>Block #{tx.blockNumber}</span>
                               <span>{new Date(tx.blockTimestamp).toLocaleDateString()}</span>
                             </div>
                             {tx.hash && (
-                              <div style={{
-                                fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)',
-                                color: '#9ca3af',
-                                wordBreak: 'break-all',
-                                marginTop: '0.25rem'
-                              }}>
+                              <div className="transaction-hash">
                                 Tx: {tx.hash.slice(0, 10)}...{tx.hash.slice(-8)}
                               </div>
                             )}
@@ -755,74 +434,43 @@ export default function Dashboard() {
 
                 {/* Automation Events */}
                 {historyData.automationEvents.length > 0 && (
-                  <div>
-                    <h5 style={{
-                      fontWeight: '500',
-                      color: '#374151',
-                      marginBottom: '0.75rem',
-                      fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-                    }}>
+                  <div className="history-section">
+                    <h5 className="history-section-title">
                       Automation Events ({historyData.automationEvents.length})
                     </h5>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <div className="history-list">
                       {historyData.automationEvents.slice(0, 5).map((event, index) => {
-                        const chainBadge = getChainBadgeColor(event.chainId)
+                        const chainStyle = getChainBadgeStyle(event.chainId)
+                        const chainName = getChainBadgeName(event.chainId)
+                        const statusStyle = getStatusColor(event.status)
+                        
                         return (
-                          <div key={index} style={{
-                            padding: '0.75rem',
-                            backgroundColor: 'white',
-                            borderRadius: '0.375rem',
-                            border: '1px solid #e5e7eb',
-                            fontSize: 'clamp(0.75rem, 2vw, 0.875rem)'
-                          }}>
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              marginBottom: '0.25rem',
-                              flexWrap: 'wrap',
-                              gap: '0.5rem'
-                            }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <span>{getAutomationIcon(event.type)}</span>
-                                <span style={{ fontWeight: '500' }}>
+                          <div key={index} className="history-item">
+                            <div className="history-item-header">
+                              <div className="history-item-info">
+                                <span className="item-icon">{getAutomationIcon(event.type)}</span>
+                                <span className="item-title">
                                   {formatTransactionType(event.type)}
                                 </span>
-                                <span style={{
-                                  padding: '0.125rem 0.375rem',
-                                  backgroundColor: chainBadge.bg,
-                                  color: chainBadge.text,
-                                  borderRadius: '0.25rem',
-                                  fontSize: 'clamp(0.5rem, 1.2vw, 0.625rem)',
-                                  fontWeight: '500'
-                                }}>
-                                  {chainBadge.name}
+                                <span 
+                                  className="chain-badge badge"
+                                  style={chainStyle}
+                                >
+                                  {chainName}
                                 </span>
                               </div>
-                              <span style={{
-                                padding: '0.25rem 0.5rem',
-                                backgroundColor: event.status === 'active' ? '#d1fae5' : '#fef3c7',
-                                color: event.status === 'active' ? '#065f46' : '#92400e',
-                                borderRadius: '0.25rem',
-                                fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)',
-                                fontWeight: '500'
-                              }}>
+                              <span 
+                                className="status-badge badge"
+                                style={statusStyle}
+                              >
                                 {event.status}
                               </span>
                             </div>
-                            <div style={{
-                              fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)',
-                              color: '#6b7280'
-                            }}>
+                            <div className="history-item-footer">
                               {new Date(event.timestamp).toLocaleString()}
                             </div>
                             {event.transactionHash && (
-                              <div style={{
-                                fontSize: 'clamp(0.625rem, 1.5vw, 0.75rem)',
-                                color: '#9ca3af',
-                                wordBreak: 'break-all',
-                                marginTop: '0.25rem'
-                              }}>
+                              <div className="transaction-hash">
                                 Event Tx: {event.transactionHash.slice(0, 10)}...{event.transactionHash.slice(-8)}
                               </div>
                             )}
@@ -837,6 +485,522 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      <style jsx>{`
+        .dashboard-container {
+          background: var(--color-white);
+          border-radius: var(--radius-xl);
+          box-shadow: var(--shadow-lg);
+          padding: 2rem;
+          border: 1px solid var(--color-coral);
+        }
+
+        .dashboard-title {
+          font-size: 1.75rem;
+          font-weight: 600;
+          margin-bottom: 1.5rem;
+          color: var(--color-root-700);
+          font-family: var(--font-display);
+        }
+
+        /* Wallet Card */
+        .wallet-card {
+          margin-bottom: 2rem;
+          padding: 1.5rem;
+          background: linear-gradient(135deg, var(--color-sand) 0%, var(--color-white) 100%);
+          border-radius: var(--radius-lg);
+          border: 1px solid var(--color-coral);
+        }
+
+        .wallet-title {
+          font-weight: 500;
+          color: var(--color-root-700);
+          margin-bottom: 0.75rem;
+          font-size: 1rem;
+        }
+
+        .wallet-address {
+          font-size: 0.875rem;
+          color: var(--color-root-600);
+          word-break: break-all;
+          margin-bottom: 0.75rem;
+          line-height: 1.4;
+          font-family: monospace;
+        }
+
+        .wallet-balance {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 0.75rem;
+        }
+
+        .balance-label {
+          color: var(--color-root-500);
+          font-size: 0.875rem;
+        }
+
+        .balance-amount {
+          font-weight: 600;
+          font-size: 0.875rem;
+          color: var(--color-root-700);
+        }
+
+        .chain-info {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.875rem;
+          color: var(--color-root-500);
+        }
+
+        .chain-badge {
+          padding: 0.375rem 0.75rem;
+          border-radius: var(--radius-md);
+          font-size: 0.75rem;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+
+        /* Section Styles */
+        .section {
+          margin-bottom: 2rem;
+        }
+
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+        }
+
+        .section-title {
+          font-weight: 500;
+          color: var(--color-root-700);
+          margin: 0;
+          font-size: 1.125rem;
+        }
+
+        .section-count {
+          font-size: 0.875rem;
+          color: var(--color-root-500);
+        }
+
+        /* Loading State */
+        .loading-state {
+          text-align: center;
+          padding: 3rem;
+          color: var(--color-root-500);
+          font-size: 0.875rem;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 1rem;
+        }
+
+        .spinner {
+          border: 2px solid var(--color-ocean-100);
+          border-top: 2px solid var(--color-ocean);
+          border-radius: 50%;
+          width: 24px;
+          height: 24px;
+          animation: spin 1s linear infinite;
+        }
+
+        /* Empty State */
+        .empty-state {
+          text-align: center;
+          color: var(--color-root-500);
+          padding: 3rem 1.5rem;
+          border: 2px dashed var(--color-coral);
+          border-radius: var(--radius-lg);
+          cursor: pointer;
+          transition: all 0.3s ease;
+          background: var(--color-sand);
+        }
+
+        .empty-state:hover {
+          background: var(--color-coral);
+          transform: translateY(-2px);
+          box-shadow: var(--shadow-md);
+        }
+
+        .empty-icon {
+          font-size: 3rem;
+          margin-bottom: 1rem;
+        }
+
+        .empty-title {
+          font-weight: 500;
+          margin-bottom: 0.5rem;
+          color: var(--color-root-700);
+          font-size: 1.125rem;
+        }
+
+        .empty-description {
+          font-size: 0.875rem;
+          margin-bottom: 1.5rem;
+          line-height: 1.4;
+        }
+
+        /* Automation Cards */
+        .automations-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .automation-card {
+          padding: 1.25rem;
+          background: var(--color-white);
+          border: 1px solid var(--color-coral);
+          border-radius: var(--radius-lg);
+          transition: all 0.3s ease;
+          box-shadow: var(--shadow-sm);
+        }
+
+        .automation-card:hover {
+          transform: translateY(-2px);
+          box-shadow: var(--shadow-md);
+          border-color: var(--color-ocean);
+        }
+
+        .automation-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 0.75rem;
+          gap: 0.75rem;
+        }
+
+        .automation-info {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          flex: 1;
+        }
+
+        .automation-icon {
+          font-size: 1.25rem;
+          flex-shrink: 0;
+        }
+
+        .automation-name {
+          font-weight: 500;
+          font-size: 0.875rem;
+          color: var(--color-root-700);
+          line-height: 1.3;
+        }
+
+        .automation-badges {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          flex-shrink: 0;
+        }
+
+        .badge {
+          padding: 0.375rem 0.75rem;
+          border-radius: var(--radius-md);
+          font-size: 0.75rem;
+          font-weight: 500;
+          white-space: nowrap;
+        }
+
+        .automation-description {
+          font-size: 0.875rem;
+          color: var(--color-root-600);
+          margin-bottom: 0.75rem;
+          line-height: 1.4;
+        }
+
+        .automation-footer {
+          display: flex;
+          justify-content: space-between;
+          font-size: 0.75rem;
+          color: var(--color-root-400);
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .view-all-btn {
+          width: 100%;
+          padding: 1rem;
+          background: var(--color-sand);
+          color: var(--color-root-600);
+          border: 1px solid var(--color-coral);
+          border-radius: var(--radius-lg);
+          font-size: 0.875rem;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          font-weight: 500;
+        }
+
+        .view-all-btn:hover {
+          background: var(--color-coral);
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-sm);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+          gap: 1rem;
+        }
+
+        .stat-card {
+          padding: 1.5rem 1rem;
+          border-radius: var(--radius-lg);
+          text-align: center;
+          box-shadow: var(--shadow-sm);
+          transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-2px);
+          box-shadow: var(--shadow-md);
+        }
+
+        .stat-card.ocean {
+          background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-400) 100%);
+          color: white;
+        }
+
+        .stat-card.root {
+          background: linear-gradient(135deg, var(--color-root) 0%, var(--color-root-400) 100%);
+          color: white;
+        }
+
+        .stat-card.success {
+          background: linear-gradient(135deg, var(--color-success) 0%, #059669 100%);
+          color: white;
+        }
+
+        .stat-card.coral {
+          background: linear-gradient(135deg, var(--color-coral) 0%, var(--color-clay) 100%);
+          color: var(--color-root-700);
+        }
+
+        .stat-number {
+          font-size: 1.5rem;
+          font-weight: 600;
+          margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+          font-size: 0.75rem;
+          opacity: 0.9;
+        }
+
+        /* Actions */
+        .actions-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          gap: 0.75rem;
+        }
+
+        .action-btn {
+          padding: 1rem;
+          border-radius: var(--radius-lg);
+          font-size: 0.875rem;
+          border: none;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+        }
+
+        .action-btn.primary {
+          background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-400) 100%);
+          color: white;
+          box-shadow: var(--shadow-sm);
+        }
+
+        .action-btn.secondary {
+          background: var(--color-sand);
+          color: var(--color-root-600);
+          border: 1px solid var(--color-coral);
+        }
+
+        .action-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: var(--shadow-md);
+        }
+
+        .btn-icon {
+          font-size: 1rem;
+        }
+
+        /* History Panel */
+        .history-panel {
+          margin-top: 1.5rem;
+          padding: 1.5rem;
+          background: var(--color-sand);
+          border-radius: var(--radius-lg);
+          border: 1px solid var(--color-coral);
+        }
+
+        .history-title {
+          font-weight: 500;
+          color: var(--color-root-700);
+          margin-bottom: 1.5rem;
+          font-size: 1.125rem;
+        }
+
+        .empty-history {
+          text-align: center;
+          color: var(--color-root-500);
+          padding: 3rem 1rem;
+        }
+
+        .empty-subtitle {
+          font-size: 0.75rem;
+          margin-top: 0.5rem;
+        }
+
+        .history-content {
+          display: flex;
+          flex-direction: column;
+          gap: 1.5rem;
+        }
+
+        .history-section-title {
+          font-weight: 500;
+          color: var(--color-root-600);
+          margin-bottom: 1rem;
+          font-size: 0.875rem;
+        }
+
+        .history-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+
+        .history-item {
+          padding: 1rem;
+          background: var(--color-white);
+          border-radius: var(--radius-lg);
+          border: 1px solid var(--color-coral);
+          transition: all 0.2s ease;
+        }
+
+        .history-item:hover {
+          border-color: var(--color-ocean);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .history-item-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 0.5rem;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .history-item-info {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+        }
+
+        .item-icon {
+          font-size: 1rem;
+        }
+
+        .item-title {
+          font-weight: 500;
+          font-size: 0.875rem;
+          color: var(--color-root-700);
+        }
+
+        .item-value {
+          color: var(--color-success);
+          font-weight: 500;
+          font-size: 0.875rem;
+        }
+
+        .history-item-footer {
+          display: flex;
+          justify-content: space-between;
+          font-size: 0.75rem;
+          color: var(--color-root-500);
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+
+        .transaction-hash {
+          font-size: 0.75rem;
+          color: var(--color-root-400);
+          word-break: break-all;
+          margin-top: 0.5rem;
+          font-family: monospace;
+        }
+
+        /* Buttons */
+        .btn-primary {
+          padding: 0.75rem 1.5rem;
+          background: linear-gradient(135deg, var(--color-ocean) 0%, var(--color-ocean-400) 100%);
+          color: white;
+          border: none;
+          border-radius: var(--radius-lg);
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          box-shadow: var(--shadow-sm);
+        }
+
+        .btn-primary:hover {
+          transform: translateY(-1px);
+          box-shadow: var(--shadow-md);
+        }
+
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+          .dashboard-container {
+            padding: 1.5rem;
+          }
+
+          .dashboard-title {
+            font-size: 1.5rem;
+          }
+
+          .wallet-card {
+            padding: 1.25rem;
+          }
+
+          .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .actions-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .automation-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+          }
+
+          .automation-badges {
+            width: 100%;
+            justify-content: flex-start;
+          }
+        }
+      `}</style>
     </div>
   )
 }
